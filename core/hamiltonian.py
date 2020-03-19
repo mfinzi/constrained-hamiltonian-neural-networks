@@ -97,7 +97,7 @@ def EuclideanT(p, Minv):
 
 
 class RigidBody(object):
-    self.body_graph = NotImplemented
+    body_graph = NotImplemented
     def mass_matrix(self):
         n = len(self.body_graph.nodes)
         M = torch.zeros(n,n)
@@ -117,7 +117,7 @@ class RigidBody(object):
     def global2bodyCoords(self):
         raise NotImplementedError
     def body2globalCoords(self):
-        raise NotImplementedError
+        raise NotImplementedError #TODO: use nx.bfs_edges and tethers
     def sample_initial_conditions(self,n_systems):
         raise NotImplementedError
 
@@ -126,15 +126,40 @@ class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
         self.body_graph = nx.Graph()
         if beams:
-            self.body_graph.add_node(0,tether = torch.zeros(2))
+            self.body_graph.add_node(0,tether=torch.zeros(2),l=l)
             for i in range(1,links):
                 self.body_graph.add_node(i)
                 self.body_graph.add_edge(i-1,i,m=m,I=m/12,l=l)
         else:
-            self.body_graph.add_node(0,m=m,tether = torch.zeros(2))
+            self.body_graph.add_node(0,m=m,tether=torch.zeros(2),l=l)
             for i in range(1,links):
                 self.body_graph.add_node(i,m=m)
                 self.body_graph.add_edge(i-1,i,l=l)
+    def sample_IC_angular(self,N):
+        n = len(self.body_graph.nodes)
+        angles_and_angvel = torch.randn(N,2,n)
+        return angles_and_angvel
+    def sample_initial_conditions(self,N):
+        d=2; n = len(self.body_graph.nodes)
+        angles_omega = self.sample_IC_angular(N) #(N,2,n)
+        initial_conditions = torch.zeros(N,2,n,d)
+        initial_conditions[:,0]*=0
+        position_velocity = torch.zeros(N,2,d)
+        length  = self.body_graph.nodes[0]['l']
+        position_velocity[:,0,:] += self.body_graph.nodes[0]['tether'][None]
+        position_velocity[:,0,0] +=  length*angles_omega[:,0,0].sin()
+        position_velocity[:,1,0] +=  length*angles_omega[:,0,0].cos()*angles_omega[:,1,0]
+        position_velocity[:,0,1] -=  length*angles_omega[:,0,0].cos()
+        position_velocity[:,1,1] +=  length*angles_omega[:,0,0].sin()*angles_omega[:,1,0]
+        initial_conditions[:,:,0] = position_velocity
+        for (_,j), length in nx.get_edge_attributes(self.body_graph,'l').items():
+            position_velocity[:,0,0] +=  length*angles_omega[:,0,j].sin()
+            position_velocity[:,1,0] +=  length*angles_omega[:,0,j].cos()*angles_omega[:,1,j]
+            position_velocity[:,0,1] -=  length*angles_omega[:,0,j].cos()
+            position_velocity[:,1,1] +=  length*angles_omega[:,0,j].sin()*angles_omega[:,1,j]
+            initial_conditions[:,:,j] = position_velocity
+        return initial_conditions
+
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
     def __init__(self, qt, ms=None, box_lim=(-1, 1)):
