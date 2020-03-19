@@ -68,6 +68,7 @@ def FCswish(chin,chout):
 class MVNet(nn.Module,metaclass=Named): # abstract Hamiltonian network class
     def __init__(self,G):
         super().__init__()
+        
         self.m = torch.nn.Parameter(torch.eye(n))
     @property
     def M(self):

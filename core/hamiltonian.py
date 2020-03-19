@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-
+import networkx as nx
 
 class HamiltonianDynamics(nn.Module):
     """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
@@ -96,7 +96,45 @@ def EuclideanT(p, Minv):
     return (p*(Minv@p)).sum(-1).sum(-1)
 
 
-class CompoundPendulum()
+class RigidBody(object):
+    self.body_graph = NotImplemented
+    def mass_matrix(self):
+        n = len(self.body_graph.nodes)
+        M = torch.zeros(n,n)
+        for i, mass in nx.get_node_attributes(self.body_graph,'m').items():
+            M[i,i] += mass
+        for (i,j), mass in nx.get_edge_attributes(self.body_graph,'m').items():
+            M[i,i] += mass
+            M[i,j] += mass
+            M[j,i] += mass
+            M[j,j] += mass
+        for (i,j), inertia in nx.get_edge_attributes(self.body_graph,'I').items():
+            M[i,i] += inertia
+            M[i,j] -= inertia
+            M[j,i] -= inertia
+            M[j,j] += inertia
+        return M
+    def global2bodyCoords(self):
+        raise NotImplementedError
+    def body2globalCoords(self):
+        raise NotImplementedError
+    def sample_initial_conditions(self,n_systems):
+        raise NotImplementedError
+
+
+class ChainPendulum(RigidBody):
+    def __init__(self,links=2,beams=False,m=1,l=1):
+        self.body_graph = nx.Graph()
+        if beams:
+            self.body_graph.add_node(0,tether = torch.zeros(2))
+            for i in range(1,links):
+                self.body_graph.add_node(i)
+                self.body_graph.add_edge(i-1,i,m=m,I=m/12,l=l)
+        else:
+            self.body_graph.add_node(0,m=m,tether = torch.zeros(2))
+            for i in range(1,links):
+                self.body_graph.add_node(i,m=m)
+                self.body_graph.add_edge(i-1,i,l=l)
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
     def __init__(self, qt, ms=None, box_lim=(-1, 1)):
