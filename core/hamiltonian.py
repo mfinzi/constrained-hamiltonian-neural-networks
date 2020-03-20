@@ -3,6 +3,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import networkx as nx
+import functools
 
 class HamiltonianDynamics(nn.Module):
     """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
@@ -97,23 +98,41 @@ def EuclideanT(p, Minv):
 
 
 class RigidBody(object):
+    """ Two dimensional rigid body consisting of point masses on nodes (with zero inertia)
+        and beams with mass and inertia connecting nodes. Edge inertia is interpreted as 
+        the unitless quantity, I/ml^2. Ie 1/12 for a beam, 1/2 for a disk"""
     body_graph = NotImplemented
+    _m = None
     def mass_matrix(self):
+        """ For mass and inertia on edges, we assume the center of mass
+            of the segment is the midpoint between (x_i,x_j): x_com = (x_i+x_j)/2"""
         n = len(self.body_graph.nodes)
         M = torch.zeros(n,n)
         for i, mass in nx.get_node_attributes(self.body_graph,'m').items():
             M[i,i] += mass
         for (i,j), mass in nx.get_edge_attributes(self.body_graph,'m').items():
-            M[i,i] += mass
-            M[i,j] += mass
-            M[j,i] += mass
-            M[j,j] += mass
+            M[i,i] += mass/4
+            M[i,j] += mass/4
+            M[j,i] += mass/4
+            M[j,j] += mass/4
         for (i,j), inertia in nx.get_edge_attributes(self.body_graph,'I').items():
-            M[i,i] += inertia
-            M[i,j] -= inertia
-            M[j,i] -= inertia
-            M[j,j] += inertia
+            M[i,i] += inertia*mass
+            M[i,j] -= inertia*mass
+            M[j,i] -= inertia*mass
+            M[j,j] += inertia*mass
         return M
+    @property
+    def M(self):
+        if self._m is None:
+            self._m = self.mass_matrix()
+        return self._m
+    @property
+    def Minv(self):
+        if self._minv is None:
+            self._minv = self.M.inverse()
+        return self._minv
+    def DPhi(self):
+        return functools.partial(rigid_DPhi,self.body_graph,self.Minv)
     def global2bodyCoords(self):
         raise NotImplementedError
     def body2globalCoords(self):
@@ -121,6 +140,20 @@ class RigidBody(object):
     def sample_initial_conditions(self,n_systems):
         raise NotImplementedError
 
+def GravityHamiltonian(M,Minv,t,z):
+    """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
+    g=1
+    D = z.shape[-1] # of ODE dims, 2*num_particles*space_dim
+    bs,n,_ = M.shape
+    x = z[:,:D//2].reshape(bs,n,-1)
+    p = z[:,D//2:].reshape(bs,n,-1)
+    T=EuclideanT(p,Minv)
+    V =g*(M@x)[...,1].sum(1)# TODO fix this and add the masses, correct for beams
+    return T+V
+
+def EuclideanAndGravityDynamics(rigid_body):
+    H = partial(GravityHamiltonian,M=rigid_body.M,Minv=rigid_body.Minv)
+    return ConstrainedHamiltonianDynamics(H,rigid_body.DPhi,wgrad=wgrad)
 
 class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
@@ -129,7 +162,7 @@ class ChainPendulum(RigidBody):
             self.body_graph.add_node(0,tether=torch.zeros(2),l=l)
             for i in range(1,links):
                 self.body_graph.add_node(i)
-                self.body_graph.add_edge(i-1,i,m=m,I=m/12,l=l)
+                self.body_graph.add_edge(i-1,i,m=m,I=1/12,l=l)
         else:
             self.body_graph.add_node(0,m=m,tether=torch.zeros(2),l=l)
             for i in range(1,links):
@@ -158,7 +191,7 @@ class ChainPendulum(RigidBody):
             position_velocity[:,0,1] -=  length*angles_omega[:,0,j].cos()
             position_velocity[:,1,1] +=  length*angles_omega[:,0,j].sin()*angles_omega[:,1,j]
             initial_conditions[:,:,j] = position_velocity
-        return initial_conditions
+        return initial_conditions.reshape()
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
