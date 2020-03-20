@@ -162,7 +162,7 @@ class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
         self.body_graph = nx.Graph()
         if beams:
-            self.body_graph.add_node(0,tether=torch.zeros(2),l=l)
+            self.body_graph.add_node(0,m=m,tether=torch.zeros(2),l=l) #TODO: massful tether
             for i in range(1,links):
                 self.body_graph.add_node(i)
                 self.body_graph.add_edge(i-1,i,m=m,I=1/12,l=l)
@@ -174,7 +174,7 @@ class ChainPendulum(RigidBody):
     def sample_IC_angular(self,N):
         n = len(self.body_graph.nodes)
         angles_and_angvel = torch.randn(N,2,n)
-        #angles_and_angvel[:,1]*=10
+        #angles_and_angvel[:,1]*=1
         return angles_and_angvel
     def sample_initial_conditions(self,N):
         d=2; n = len(self.body_graph.nodes)
@@ -199,14 +199,14 @@ class ChainPendulum(RigidBody):
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
-    def __init__(self, qt,body, ms=None, box_lim=(-3, 2)):
+    def __init__(self, qt,body, ms=None, box_lim=(-2,2,-3, 2)):
         if ms is None: ms = len(qt)*[6]
         self.qt = qt
         self.G = body.body_graph
         self.fig = plt.figure()
         self.ax = self.fig.add_axes([0, 0, 1, 1])#axes(projection='3d')
-        self.ax.set_xlim(box_lim)
-        self.ax.set_ylim(box_lim)
+        self.ax.set_xlim(box_lim[:2])
+        self.ax.set_ylim(box_lim[2:])
         self.ax.set_aspect('equal')
         self.traj_lines = sum([self.ax.plot([],[],'-') for particle in self.qt],[])
         tethers = nx.get_node_attributes(self.G,'tether')
@@ -220,10 +220,10 @@ class Animation2d(object):
             line.set_data([],[])
         return self.traj_lines + self.pts+ self.beam_lines
     def update(self,i=0):
-        for line, pt, trajectory in zip(self.traj_lines,self.pts,self.qt):
+        for node_values,line, pt, trajectory in zip(self.G.nodes.values(),self.traj_lines,self.pts,self.qt):
             x,y = trajectory[:,i-50 if i>50 else 0:i+1]
             line.set_data(x,y)
-            pt.set_data(x[-1:], y[-1:])
+            if 'm' in node_values: pt.set_data(x[-1:], y[-1:])
         beams = [torch.stack([self.qt[k,:,i],self.qt[l,:,i]],dim=1) for (k,l) in self.G.edges] + \
         [torch.stack([loc,self.qt[k,:,i]],dim=1) for \
             k, loc in nx.get_node_attributes(self.G,'tether').items()]
