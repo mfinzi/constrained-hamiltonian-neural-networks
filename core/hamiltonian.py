@@ -221,7 +221,7 @@ class Animation2d(object):
         return self.traj_lines + self.pts+ self.beam_lines
     def update(self,i=0):
         for line, pt, trajectory in zip(self.traj_lines,self.pts,self.qt):
-            x,y = trajectory[:,i-50 if i>50 else 0:i]
+            x,y = trajectory[:,i-50 if i>50 else 0:i+1]
             line.set_data(x,y)
             pt.set_data(x[-1:], y[-1:])
         beams = [torch.stack([self.qt[k,:,i],self.qt[l,:,i]],dim=1) for (k,l) in self.G.edges] + \
