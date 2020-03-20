@@ -72,18 +72,16 @@ def rigid_DPhi(rigid_body_graph,Minv,z):
         dphi_dx[:,i,:,vid+E] =  2*(x[:,i]-ci)
         dphid_dx[:,i,:,vid+E] = 2*v[:,i]
         dphid_dp[:,:,:,vid+E] = 2*(x[:,i]-ci)[:,None,:]*(Minv[:,i])[:,:,None]
-    dPhi_dx = torch.cat([dphi_dx.reshape(bs,n*d,ET), dphid_dx.reshape(bs,n*d,ET)],dim=1)
-    dPhi_dp = torch.cat([dphi_dp.reshape(bs,n*d,ET), dphid_dp.reshape(bs,n*d,ET)],dim=1)
-    DPhi = torch.cat([dPhi_dx,dPhi_dp],dim=2)
+    dPhi_dx = torch.cat([dphi_dx.reshape(bs,n*d,ET), dphid_dx.reshape(bs,n*d,ET)],dim=2)
+    dPhi_dp = torch.cat([dphi_dp.reshape(bs,n*d,ET), dphid_dp.reshape(bs,n*d,ET)],dim=2)
+    DPhi = torch.cat([dPhi_dx,dPhi_dp],dim=1)
     return DPhi
 
 def J(M):
     """ applies the J matrix to another matrix M.
         input: M (*,2nd,b), output: J@M (*,2nd,b)"""
-    star = M.shape[:-2]
-    b = M.shape[-1]
-    Mqp = M.reshape(*star,2,-1,b)
-    JM = torch.cat([-Mqp[...,1,:,:],Mqp[...,0,:,:]],dim=-2)
+    *star,D,b = M.shape
+    JM = torch.cat([M[...,D//2:,:],-M[...,:D//2,:]],dim=-2)
     return JM
 
 def Proj(DPhi):
@@ -96,7 +94,7 @@ def Proj(DPhi):
 def EuclideanT(p, Minv):
     """ Shape (bs,n,d), and (bs,n,n),
         standard \sum_n pT Minv p/2 kinetic energy"""
-    return (p*(Minv@p)).sum(-1).sum(-1)
+    return (p*(Minv@p)).sum(-1).sum(-1)/2
 
 
 class RigidBody(object):
@@ -144,7 +142,7 @@ class RigidBody(object):
         raise NotImplementedError
 
 def GravityHamiltonian(M,Minv,t,z):
-    """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
+    """ computes the hamiltonian, inputs (bs,2nd)"""
     g=1
     bs,D = z.shape # of ODE dims, 2*num_particles*space_dim
     #print(M.shape)
@@ -152,6 +150,7 @@ def GravityHamiltonian(M,Minv,t,z):
     x = z[:,:D//2].reshape(bs,n,-1)
     p = z[:,D//2:].reshape(bs,n,-1)
     T=EuclideanT(p,Minv)
+    #print(T)
     V =g*(M@x)[...,1].sum(1)# TODO fix this and add the masses, correct for beams
     return T+V
 
@@ -175,6 +174,7 @@ class ChainPendulum(RigidBody):
     def sample_IC_angular(self,N):
         n = len(self.body_graph.nodes)
         angles_and_angvel = torch.randn(N,2,n)
+        #angles_and_angvel[:,1]*=10
         return angles_and_angvel
     def sample_initial_conditions(self,N):
         d=2; n = len(self.body_graph.nodes)
@@ -199,28 +199,39 @@ class ChainPendulum(RigidBody):
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
-    def __init__(self, qt, ms=None, box_lim=(-3, 2)):
+    def __init__(self, qt,body, ms=None, box_lim=(-3, 2)):
         if ms is None: ms = len(qt)*[6]
         self.qt = qt
+        self.G = body.body_graph
         self.fig = plt.figure()
         self.ax = self.fig.add_axes([0, 0, 1, 1])#axes(projection='3d')
         self.ax.set_xlim(box_lim)
         self.ax.set_ylim(box_lim)
-        self.lines = sum([self.ax.plot([],[],'-') for particle in self.qt],[])
+        self.ax.set_aspect('equal')
+        self.traj_lines = sum([self.ax.plot([],[],'-') for particle in self.qt],[])
+        tethers = nx.get_node_attributes(self.G,'tether')
+        self.beam_lines = sum([self.ax.plot([],[],'-') for _ in range(len(tethers)+len(self.G.edges))],[])
         self.pts = sum([self.ax.plot([],[],'o',ms=ms[i]) for i in range(len(self.qt))],[])
     def init(self):
-        for line,pt in zip(self.lines,self.pts):
+        for line,pt in zip(self.traj_lines,self.pts):
             line.set_data([], [])
             pt.set_data([], [])
-        return self.lines + self.pts
+        for line in self.beam_lines:
+            line.set_data([],[])
+        return self.traj_lines + self.pts+ self.beam_lines
     def update(self,i=0):
-        for line, pt, trajectory in zip(self.lines,self.pts,self.qt):
-            x,y = trajectory[:,:i]
+        for line, pt, trajectory in zip(self.traj_lines,self.pts,self.qt):
+            x,y = trajectory[:,i-50 if i>50 else 0:i]
             line.set_data(x,y)
             pt.set_data(x[-1:], y[-1:])
+        beams = [torch.stack([self.qt[k,:,i],self.qt[l,:,i]],dim=1) for (k,l) in self.G.edges] + \
+        [torch.stack([loc,self.qt[k,:,i]],dim=1) for \
+            k, loc in nx.get_node_attributes(self.G,'tether').items()]
+        for beam,line in zip(beams,self.beam_lines):
+            line.set_data(*beam)
         #self.fig.clear()
         self.fig.canvas.draw()
-        return self.lines+self.pts
+        return self.traj_lines+self.pts+self.beam_lines
     def animate(self):
         return animation.FuncAnimation(self.fig,self.update,frames=self.qt.shape[-1],
                                        interval=33,init_func=self.init,blit=True)
