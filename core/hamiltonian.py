@@ -42,36 +42,38 @@ class ConstrainedHamiltonianDynamics(nn.Module):
 def rigid_DPhi(rigid_body_graph,Minv,z):
     """inputs [Graph (n,E)] [x (bs,n,d)] [p (bs,n,d)] [Minv (bs, n, n)]
        ouput [DPhi (bs, 2nd, 2E)]"""
-    bs, n = Minv.shape[:2]
-    D = z.shape[-1] # of ODE dims, 2*num_particles*space_dim
+    n = Minv.shape[-1]
+    bs, D = z.shape # of ODE dims, 2*num_particles*space_dim
     x = z[:,:D//2].reshape(bs,n,-1)
     p = z[:,D//2:].reshape(bs,n,-1)
     bs,n,d = x.shape
+    
     G = rigid_body_graph
     tethers = nx.get_node_attributes(G,'tether')
-    E = len(G.edges)+ len(tethers)
+    E = len(G.edges)
+    ET = E + len(tethers)
     v = Minv@p
-    dphi_dx = torch.zeros(bs,n,d,E)
-    dphi_dp = torch.zeros(bs,n,d,E)
-    dphid_dx = torch.zeros(bs,n,d,E)
-    dphid_dp = torch.zeros(bs,n,d,E)
-    for i,e in enumerate(G.edges):
-        n,m = e
+    dphi_dx = torch.zeros(bs,n,d,ET)
+    dphi_dp = torch.zeros(bs,n,d,ET)
+    dphid_dx = torch.zeros(bs,n,d,ET)
+    dphid_dp = torch.zeros(bs,n,d,ET)
+    for eid,e in enumerate(G.edges):
+        i,j = e
         # Fill out dphi/dx
-        dphi_dx[:,n,:,i] =  2*(x[:,n]-x[:,m])
-        dphi_dx[:,m,:,i] =  2*(x[:,m]-x[:,n])
+        dphi_dx[:,i,:,eid] =  2*(x[:,i]-x[:,j])
+        dphi_dx[:,j,:,eid] =  2*(x[:,j]-x[:,i])
         # Fill out d\dot{phi}/dx
-        dphid_dx[:,n,:,i] = 2*(v[:,n] - v[:,m])
-        dphid_dx[:,m,:,i] = 2*(v[:,m] - v[:,n])
+        dphid_dx[:,i,:,eid] = 2*(v[:,i] - v[:,j])
+        dphid_dx[:,j,:,eid] = 2*(v[:,j] - v[:,i])
         # Fill out d\dot{phi}/dp
-        dphid_dp[:,:,:,i] = 2*(x[:,n]-x[:,m])[:,None,:]*(Minv[:,n] - Minv[:,m])[:,:,None]
-    for i,(n,pos) in enumerate(tethers.items()):
-        cn = pos[None].to(x.device)
-        dphi_dx[:,n,:,i+n] =  2*(x[:,n]-cn)
-        dphid_dx[:,n,:,i+n] = 2*v[:,n]
-        dphid_dp[:,:,:,i+n] = 2*(x[:,n]-cn)[:,None,:]*(Minv[:,n])[:,:,None]
-    dPhi_dx = torch.cat([dphi_dx.reshape(bs,n*d,E), dphid_dx.reshape(bs,n*d,E)],dim=1)
-    dPhi_dp = torch.cat([dphi_dp.reshape(bs,n*d,E), dphid_dp.reshape(bs,n*d,E)],dim=1)
+        dphid_dp[:,:,:,eid] = 2*(x[:,i]-x[:,j])[:,None,:]*(Minv[:,i] - Minv[:,j])[:,:,None]
+    for vid,(i,pos) in enumerate(tethers.items()):
+        ci = pos[None].to(x.device)
+        dphi_dx[:,i,:,vid+E] =  2*(x[:,i]-ci)
+        dphid_dx[:,i,:,vid+E] = 2*v[:,i]
+        dphid_dp[:,:,:,vid+E] = 2*(x[:,i]-ci)[:,None,:]*(Minv[:,i])[:,:,None]
+    dPhi_dx = torch.cat([dphi_dx.reshape(bs,n*d,ET), dphid_dx.reshape(bs,n*d,ET)],dim=1)
+    dPhi_dp = torch.cat([dphi_dp.reshape(bs,n*d,ET), dphid_dp.reshape(bs,n*d,ET)],dim=1)
     DPhi = torch.cat([dPhi_dx,dPhi_dp],dim=2)
     return DPhi
 
@@ -87,7 +89,7 @@ def J(M):
 def Proj(DPhi):
     def _P(M):
         DPhiT = DPhi.transpose(-1,-2)
-        X,_ = torch.solve(DPhiT@J(DPhi),DPhiT@M)
+        X,_ = torch.solve(DPhiT@M,DPhiT@J(DPhi))
         return M - J(DPhi@X)
     return _P
         
@@ -103,6 +105,7 @@ class RigidBody(object):
         the unitless quantity, I/ml^2. Ie 1/12 for a beam, 1/2 for a disk"""
     body_graph = NotImplemented
     _m = None
+    _minv = None
     def mass_matrix(self):
         """ For mass and inertia on edges, we assume the center of mass
             of the segment is the midpoint between (x_i,x_j): x_com = (x_i+x_j)/2"""
@@ -131,8 +134,8 @@ class RigidBody(object):
         if self._minv is None:
             self._minv = self.M.inverse()
         return self._minv
-    def DPhi(self):
-        return functools.partial(rigid_DPhi,self.body_graph,self.Minv)
+    def DPhi(self,z):
+        return rigid_DPhi(self.body_graph,self.Minv[None],z)
     def global2bodyCoords(self):
         raise NotImplementedError
     def body2globalCoords(self):
@@ -143,8 +146,9 @@ class RigidBody(object):
 def GravityHamiltonian(M,Minv,t,z):
     """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
     g=1
-    D = z.shape[-1] # of ODE dims, 2*num_particles*space_dim
-    bs,n,_ = M.shape
+    bs,D = z.shape # of ODE dims, 2*num_particles*space_dim
+    #print(M.shape)
+    n = M.shape[1]
     x = z[:,:D//2].reshape(bs,n,-1)
     p = z[:,D//2:].reshape(bs,n,-1)
     T=EuclideanT(p,Minv)
@@ -152,8 +156,8 @@ def GravityHamiltonian(M,Minv,t,z):
     return T+V
 
 def EuclideanAndGravityDynamics(rigid_body):
-    H = partial(GravityHamiltonian,M=rigid_body.M,Minv=rigid_body.Minv)
-    return ConstrainedHamiltonianDynamics(H,rigid_body.DPhi,wgrad=wgrad)
+    H = functools.partial(GravityHamiltonian,rigid_body.M[None],rigid_body.Minv[None])
+    return ConstrainedHamiltonianDynamics(H,rigid_body.DPhi)
 
 class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
@@ -191,11 +195,11 @@ class ChainPendulum(RigidBody):
             position_velocity[:,0,1] -=  length*angles_omega[:,0,j].cos()
             position_velocity[:,1,1] +=  length*angles_omega[:,0,j].sin()*angles_omega[:,1,j]
             initial_conditions[:,:,j] = position_velocity
-        return initial_conditions.reshape()
+        return initial_conditions
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
-    def __init__(self, qt, ms=None, box_lim=(-1, 1)):
+    def __init__(self, qt, ms=None, box_lim=(-3, 2)):
         if ms is None: ms = len(qt)*[6]
         self.qt = qt
         self.fig = plt.figure()
