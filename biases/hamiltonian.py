@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import networkx as nx
 import functools
+from oil.utils.utils import Named, export, Expression
+from torchdiffeq import odeint_adjoint as odeint
 
 class HamiltonianDynamics(nn.Module):
     """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
@@ -53,10 +55,10 @@ def rigid_DPhi(rigid_body_graph,Minv,z):
     E = len(G.edges)
     ET = E + len(tethers)
     v = Minv@p
-    dphi_dx = torch.zeros(bs,n,d,ET)
-    dphi_dp = torch.zeros(bs,n,d,ET)
-    dphid_dx = torch.zeros(bs,n,d,ET)
-    dphid_dp = torch.zeros(bs,n,d,ET)
+    dphi_dx = torch.zeros(bs,n,d,ET,device=z.device,dtype=z.dtype)
+    dphi_dp = torch.zeros(bs,n,d,ET,device=z.device,dtype=z.dtype)
+    dphid_dx = torch.zeros(bs,n,d,ET,device=z.device,dtype=z.dtype)
+    dphid_dp = torch.zeros(bs,n,d,ET,device=z.device,dtype=z.dtype)
     for eid,e in enumerate(G.edges):
         i,j = e
         # Fill out dphi/dx
@@ -87,7 +89,8 @@ def J(M):
 def Proj(DPhi):
     def _P(M):
         DPhiT = DPhi.transpose(-1,-2)
-        X,_ = torch.solve(DPhiT@M,DPhiT@J(DPhi))
+        reg = 0#1e-4*torch.eye(DPhi.shape[-1],dtype=DPhi.dtype,device=DPhi.device)[None]
+        X,_ = torch.solve(DPhiT@M,DPhiT@J(DPhi)+reg)
         return M - J(DPhi@X)
     return _P
         
@@ -97,7 +100,7 @@ def EuclideanT(p, Minv):
     return (p*(Minv@p)).sum(-1).sum(-1)/2
 
 
-class RigidBody(object):
+class RigidBody(object,metaclass=Named):
     """ Two dimensional rigid body consisting of point masses on nodes (with zero inertia)
         and beams with mass and inertia connecting nodes. Edge inertia is interpreted as 
         the unitless quantity, I/ml^2. Ie 1/12 for a beam, 1/2 for a disk"""
@@ -133,30 +136,35 @@ class RigidBody(object):
             self._minv = self.M.inverse()
         return self._minv
     def DPhi(self,z):
-        return rigid_DPhi(self.body_graph,self.Minv[None],z)
+        Minv = self.Minv[None].to(device=z.device,dtype=z.dtype)
+        return rigid_DPhi(self.body_graph,Minv,z)
     def global2bodyCoords(self):
         raise NotImplementedError
     def body2globalCoords(self):
         raise NotImplementedError #TODO: use nx.bfs_edges and tethers
     def sample_initial_conditions(self,n_systems):
         raise NotImplementedError
-
-def GravityHamiltonian(M,Minv,t,z):
-    """ computes the hamiltonian, inputs (bs,2nd)"""
-    g=1
-    bs,D = z.shape # of ODE dims, 2*num_particles*space_dim
-    #print(M.shape)
-    n = M.shape[1]
-    x = z[:,:D//2].reshape(bs,n,-1)
-    p = z[:,D//2:].reshape(bs,n,-1)
-    T=EuclideanT(p,Minv)
-    #print(T)
-    V =g*(M@x)[...,1].sum(1)# TODO fix this and add the masses, correct for beams
-    return T+V
-
-def EuclideanAndGravityDynamics(rigid_body):
-    H = functools.partial(GravityHamiltonian,rigid_body.M[None],rigid_body.Minv[None])
-    return ConstrainedHamiltonianDynamics(H,rigid_body.DPhi)
+    def potential(self,x):
+        raise NotImplementedError
+    def hamiltonian(self,t,z):
+        bs,D = z.shape # of ODE dims, 2*num_particles*space_dim
+        n = len(self.body_graph.nodes)
+        x = z[:,:D//2].reshape(bs,n,-1)
+        p = z[:,D//2:].reshape(bs,n,-1)
+        T=EuclideanT(p,self.Minv)
+        V = self.potential(x)
+        return T+V
+    def dynamics(self):
+        return ConstrainedHamiltonianDynamics(self.hamiltonian,self.DPhi)
+    def integrate(self,z0,T):# (x,v) -> (x,p) -> (x,v)
+        """ Integrate system from z0 to times in T (e.g. linspace(0,10,100))"""
+        bs = z0.shape[0]
+        xp = torch.stack([z0[:,0],self.M@z0[:,1]],dim=1).reshape(bs,-1)
+        with torch.no_grad():
+            xpt = odeint(self.dynamics(),xp,T,rtol=1e-7,method='rk4')
+        xps = xpt.permute(1,0,2).reshape(bs,len(T),*z0.shape[1:])
+        xvs = torch.stack([xps[:,:,0],self.Minv@xps[:,:,1]],dim=2)
+        return xvs
 
 class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
@@ -196,6 +204,9 @@ class ChainPendulum(RigidBody):
             position_velocity[:,1,1] +=  length*angles_omega[:,0,j].sin()*angles_omega[:,1,j]
             initial_conditions[:,:,j] = position_velocity
         return initial_conditions
+    def potential(self,x):
+        """ Gravity potential """
+        return (self.M@x)[...,1].sum(1)
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):
