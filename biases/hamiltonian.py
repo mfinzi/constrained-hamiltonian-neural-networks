@@ -111,7 +111,7 @@ class RigidBody(object,metaclass=Named):
         """ For mass and inertia on edges, we assume the center of mass
             of the segment is the midpoint between (x_i,x_j): x_com = (x_i+x_j)/2"""
         n = len(self.body_graph.nodes)
-        M = torch.zeros(n,n)
+        M = torch.zeros(n,n).double()
         for i, mass in nx.get_node_attributes(self.body_graph,'m').items():
             M[i,i] += mass
         for (i,j), mass in nx.get_edge_attributes(self.body_graph,'m').items():
@@ -135,6 +135,9 @@ class RigidBody(object,metaclass=Named):
         if self._minv is None:
             self._minv = self.M.inverse()
         return self._minv
+    def to(self,device=None,dtype=None):
+        self._m = self._m.to(device,dtype)
+        self._minv = self._minv.to(device,dtype)
     def DPhi(self,z):
         Minv = self.Minv[None].to(device=z.device,dtype=z.dtype)
         return rigid_DPhi(self.body_graph,Minv,z)
@@ -154,17 +157,17 @@ class RigidBody(object,metaclass=Named):
         T=EuclideanT(p,self.Minv)
         V = self.potential(x)
         return T+V
-    def dynamics(self):
-        return ConstrainedHamiltonianDynamics(self.hamiltonian,self.DPhi)
-    def integrate(self,z0,T):# (x,v) -> (x,p) -> (x,v)
+    def dynamics(self,wgrad=False):
+        return ConstrainedHamiltonianDynamics(self.hamiltonian,self.DPhi,wgrad=wgrad)
+    def integrate(self,z0,T,tol=1e-5):# (x,v) -> (x,p) -> (x,v)
         """ Integrate system from z0 to times in T (e.g. linspace(0,10,100))"""
         bs = z0.shape[0]
-        xp = torch.stack([z0[:,0],self.M@z0[:,1]],dim=1).reshape(bs,-1)
+        xp = torch.stack([z0[:,0].double(),self.M@z0[:,1].double()],dim=1).reshape(bs,-1)
         with torch.no_grad():
-            xpt = odeint(self.dynamics(),xp,T,rtol=1e-7,method='rk4')
+            xpt = odeint(self.dynamics(),xp,T.double(),rtol=tol,method='dopri5')
         xps = xpt.permute(1,0,2).reshape(bs,len(T),*z0.shape[1:])
-        xvs = torch.stack([xps[:,:,0],self.Minv@xps[:,:,1]],dim=2)
-        return xvs
+        xvs = torch.stack([xps[:,:,0],self.Minv.double()@xps[:,:,1]],dim=2)
+        return xvs.to(z0.device)
 
 class ChainPendulum(RigidBody):
     def __init__(self,links=2,beams=False,m=1,l=1):
@@ -207,6 +210,71 @@ class ChainPendulum(RigidBody):
     def potential(self,x):
         """ Gravity potential """
         return (self.M@x)[...,1].sum(1)
+
+def jvp(y,x,v):
+    with torch.enable_grad():
+        Jv = torch.autograd.grad(y,[x],[v])[0]
+    return Jv
+def vjp(y,x,v):
+    # Following the trick from https://j-towns.github.io/2017/06/12/A-new-trick.html
+    with torch.enable_grad():
+        u = torch.ones_like(y,requires_grad=True) # Dummy variable (could take any value)
+        Ju = torch.autograd.grad(y,[x],[u],create_graph=True)[0]
+        vJ = torch.autograd.grad(Ju,[u],[v])[0]
+    return vJ
+import numpy as np
+def MLE(xt,ts,F,v0=None):
+    """ Computes the Maximal Lyapunov exponent using the Power iteration.
+        inputs: trajectory [xt (T,*)] dynamics [F] """
+    v = torch.randn_like(xt[0]) if v0 is None else v0
+    dt = ts[1]-ts[0]
+    exps = []
+    for i,x in enumerate(xt):
+        #for j in range(5):
+        x = torch.zeros_like(x, requires_grad=True) + x.detach()
+        y = F(ts[i],x[None])[0]
+        u = v+vjp(y,x,v).detach()*dt
+        #u  = v+ dt*(F(ts[i],(x+1e-7*v)[None])[0]-F(ts[i],x[None])[0])/(1e-7)
+        r = (u**2).sum().sqrt().detach()
+        v = u/r#P((u/r)[None,:,None])[0,:,0]
+        exps += [r.log().item()/dt]#(1/i)*(r.log() - exp)
+        #print(r.log()/(100/5000))
+    return np.array(exps)#,u
+
+class LyapunovDynamics(nn.Module):
+    def __init__(self,F):
+        super().__init__()
+        self.F = F
+    def forward(self,t,xqr):
+        n = (xqr.shape[-1]-1)//2
+        with torch.enable_grad():
+            x = xqr[...,:n] + torch.zeros_like(xqr[...,:n],requires_grad=True)
+            q = xqr[...,n:2*n]
+            xdot = self.F(t,x)
+            DFq = vjp(xdot,x,q)
+        qDFq = (q*DFq).sum(-1,keepdims=True)
+        qdot = DFq - q*qDFq
+        lrdot = qDFq
+        xqrdot = torch.cat([xdot,qdot,lrdot],dim=-1)
+        return xqrdot
+
+
+def MLE2(x0,F,ts,**kwargs):
+    with torch.no_grad():
+        LD = LyapunovDynamics(F)
+        x0 = x0.reshape(x0.shape[0],-1)
+        q0 = torch.randn_like(x0)
+        q0 /= (q0**2).sum(-1,keepdims=True).sqrt()
+        lr0 = torch.zeros(x0.shape[0],1,dtype=x0.dtype,device=x0.device)
+        Lx0 = torch.cat([x0,q0,lr0],dim=-1)
+        Lxt = odeint(LD,Lx0,ts,**kwargs)
+        maximal_exponent = Lxt#[...,-1]
+    return maximal_exponent
+    
+
+
+
+
 
 # Make animation plots look nicer. Why are there leftover points on the trails?
 class Animation2d(object):

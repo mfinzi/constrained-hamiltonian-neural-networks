@@ -19,12 +19,12 @@ except ImportError:
     warnings.warn('Failed to import graphnets. Please install using \
                 `pip install .[GN]` for this functionality', ImportWarning)
 
-def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=100,regen=False,dataset=RigidBodyDataset,C=5,dt=.1,
+def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,dataset=RigidBodyDataset,C=10,dt=.1,
                 dtype=torch.float32,device=torch.device('cuda'),bs=200,num_epochs=2,
                 trainer_config={}):
     # Create Training set and model
-    splits = {'train':n_train,'val':200,'test':100}
-    dataset = dataset(n_systems=1000,regen=regen,chunk_len=C,dt=dt)
+    splits = {'train':n_train,'val':200,'test':200}
+    dataset = dataset(n_systems=1000,regen=regen,chunk_len=C,dt=dt,integration_time=10)
     with FixedNumpySeed(0):
         datasets = split_dataset(dataset,splits)
     model = network(G=dataset.body.body_graph,**net_cfg).to(device=device,dtype=dtype)

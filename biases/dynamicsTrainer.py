@@ -9,8 +9,8 @@ from lie_conv.lieGroups import Trivial,T
 from lie_conv.moleculeTrainer import BottleBlock, GlobalPool
 from lie_conv.utils import Expression, export, Named
 import numpy as np
-from torchdiffeq import odeint
-
+#from torchdiffeq import odeint
+from torchdiffeq import odeint_adjoint as odeint
 @export
 class IntegratedDynamicsTrainer(Trainer):
     """ Model should specify the dynamics, mapping from t,z,sysP -> dz/dt"""
@@ -22,7 +22,7 @@ class IntegratedDynamicsTrainer(Trainer):
     def loss(self, minibatch):
         """ Standard cross-entropy loss """
         (z0, ts), true_zs = minibatch
-        pred_zs = self.model.integrate(z0, ts[0])
+        pred_zs = self.model.integrate(z0, ts[0],tol=self.hypers['tol'])
         self.num_mbs += 1
         return (pred_zs - true_zs).pow(2).mean()
 
@@ -51,24 +51,25 @@ class CHNN(nn.Module,metaclass=Named): # abstract Hamiltonian network class
         super().__init__(**kwargs)
         self.G=G
         self.nfe=0
-        n = len(self.G.nodes())
-        self._m_lower = torch.nn.Parameter(torch.eye(n))
+        self.n = len(self.G.nodes())
+        self._m_lower = torch.nn.Parameter(torch.eye(self.n))
     @property
     def Minv(self):
         lower_diag = tril_mask(self._m_lower)*self._m_lower
-        return lower_diag@lower_diag.T
-    @property
-    def M(self):
+        reg = torch.eye(self.n,device=lower_diag.device,dtype=lower_diag.dtype)
+        return lower_diag@lower_diag.T#+1e-4*reg
+    #@property
+    def M(self,x):
         lower_diag = tril_mask(self._m_lower)*self._m_lower
-        return torch.cholesky_inverse(lower_diag)
+        Mx = torch.cholesky_solve(x,lower_diag)
+        return Mx# - 1e-4*torch.cholesky_solve(Mx,lower_diag)
     def H(self,t,z):
         """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
         D = z.shape[-1] # of ODE dims, 2*num_particles*space_dim
         Minv = self.Minv
-        n,_ = Minv.shape
         bs = z.shape[0]
-        q = z[:,:D//2].reshape(bs,n,-1)
-        p = z[:,D//2:].reshape(bs,n,-1)
+        q = z[:,:D//2].reshape(bs,self.n,-1)
+        p = z[:,D//2:].reshape(bs,self.n,-1)
         T=EuclideanT(p,Minv)
         V =self.compute_V(q)
         return T+V
@@ -79,12 +80,12 @@ class CHNN(nn.Module,metaclass=Named): # abstract Hamiltonian network class
         return dynamics(t,z)
     def compute_V(self,q):
         raise NotImplementedError
-    def integrate(self,z0,ts,rtol=1e-4):
+    def integrate(self,z0,ts,tol=1e-6):
         """ inputs [z0: (bs, z_dim), ts: (bs, T), sys_params: (bs, n, c)]
             outputs pred_zs: (bs, T, z_dim) """
         bs = z0.shape[0]
-        xp = torch.stack([z0[:,0],self.M@z0[:,1]],dim=1).reshape(bs,-1)
-        xpt = odeint(self, xp, ts, rtol=rtol, method='rk4')
+        xp = torch.stack([z0[:,0],self.M(z0[:,1])],dim=1).reshape(bs,-1)
+        xpt = odeint(self, xp, ts, rtol=tol, method='rk4')
         xps = xpt.permute(1,0,2).reshape(bs,len(ts),*z0.shape[1:])
         xvs = torch.stack([xps[:,:,0],self.Minv@xps[:,:,1]],dim=2)
         return xvs
