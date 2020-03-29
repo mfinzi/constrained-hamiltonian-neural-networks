@@ -190,20 +190,20 @@ class ChainPendulum(RigidBody):
         global_position_velocity = torch.zeros(N,2,d)
         length  = self.body_graph.nodes[0]['l']
         global_position_velocity[:,0,:] = self.body_graph.nodes[0]['tether'][None]
-        global_position_velocity += joint2cartesian(length,angles_omega[...,0])
+        global_position_velocity += self.joint2cartesian(length,angles_omega[...,0])
         pvs[:,:,0] = global_position_velocity
         for (_,j), length in nx.get_edge_attributes(self.body_graph,'l').items():
-            global_position_velocity += joint2cartesian(length,angles_omega[...,j])
+            global_position_velocity += self.joint2cartesian(length,angles_omega[...,j])
             pvs[:,:,j] = global_position_velocity
         return pvs
-    def joint2cartesian(length,angle_omega):
+    def joint2cartesian(self,length,angle_omega):
         position_vel = torch.zeros(angle_omega.shape[0],2,2)
-        position_vel[:,0,0] =  length*angles_omega[:,0].sin()
-        position_vel[:,1,0] =  length*angles_omega[:,0].cos()*angles_omega[:,1]
-        position_vel[:,0,1] =  -length*angles_omega[:,0].cos()
-        position_vel[:,1,1] =  length*angles_omega[:,0].sin()*angles_omega[:,1]
+        position_vel[:,0,0] =  length*angle_omega[:,0].sin()
+        position_vel[:,1,0] =  length*angle_omega[:,0].cos()*angle_omega[:,1]
+        position_vel[:,0,1] =  -length*angle_omega[:,0].cos()
+        position_vel[:,1,1] =  length*angle_omega[:,0].sin()*angle_omega[:,1]
         return position_vel
-    def cartesian2angle(length,rel_pos_vel):
+    def cartesian2angle(self,length,rel_pos_vel):
         raise NotImplementedError
     def global2bodyCoords(self):
         raise NotImplementedError
