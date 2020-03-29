@@ -182,31 +182,36 @@ class ChainPendulum(RigidBody):
             for i in range(1,links):
                 self.body_graph.add_node(i,m=m)
                 self.body_graph.add_edge(i-1,i,l=l)
-    def sample_IC_angular(self,N):
-        n = len(self.body_graph.nodes)
-        angles_and_angvel = torch.randn(N,2,n)
-        #angles_and_angvel[:,1]*=1
-        return angles_and_angvel
-    def sample_initial_conditions(self,N):
-        d=2; n = len(self.body_graph.nodes)
-        angles_omega = self.sample_IC_angular(N) #(N,2,n)
-        initial_conditions = torch.zeros(N,2,n,d)
-        initial_conditions[:,0]*=0
-        position_velocity = torch.zeros(N,2,d)
+
+
+    def body2globalCoords(self,angles_omega):
+        d=2; n = len(self.body_graph.nodes); N = angles_omega.shape[0]
+        pvs = torch.zeros(N,2,n,d)
+        global_position_velocity = torch.zeros(N,2,d)
         length  = self.body_graph.nodes[0]['l']
-        position_velocity[:,0,:] += self.body_graph.nodes[0]['tether'][None]
-        position_velocity[:,0,0] +=  length*angles_omega[:,0,0].sin()
-        position_velocity[:,1,0] +=  length*angles_omega[:,0,0].cos()*angles_omega[:,1,0]
-        position_velocity[:,0,1] -=  length*angles_omega[:,0,0].cos()
-        position_velocity[:,1,1] +=  length*angles_omega[:,0,0].sin()*angles_omega[:,1,0]
-        initial_conditions[:,:,0] = position_velocity
+        global_position_velocity[:,0,:] = self.body_graph.nodes[0]['tether'][None]
+        global_position_velocity += self.joint2cartesian(length,angles_omega[...,0])
+        pvs[:,:,0] = global_position_velocity
         for (_,j), length in nx.get_edge_attributes(self.body_graph,'l').items():
-            position_velocity[:,0,0] +=  length*angles_omega[:,0,j].sin()
-            position_velocity[:,1,0] +=  length*angles_omega[:,0,j].cos()*angles_omega[:,1,j]
-            position_velocity[:,0,1] -=  length*angles_omega[:,0,j].cos()
-            position_velocity[:,1,1] +=  length*angles_omega[:,0,j].sin()*angles_omega[:,1,j]
-            initial_conditions[:,:,j] = position_velocity
-        return initial_conditions
+            global_position_velocity += self.joint2cartesian(length,angles_omega[...,j])
+            pvs[:,:,j] = global_position_velocity
+        return pvs
+    def joint2cartesian(self,length,angle_omega):
+        position_vel = torch.zeros(angle_omega.shape[0],2,2)
+        position_vel[:,0,0] =  length*angle_omega[:,0].sin()
+        position_vel[:,1,0] =  length*angle_omega[:,0].cos()*angle_omega[:,1]
+        position_vel[:,0,1] =  -length*angle_omega[:,0].cos()
+        position_vel[:,1,1] =  length*angle_omega[:,0].sin()*angle_omega[:,1]
+        return position_vel
+    def cartesian2angle(self,length,rel_pos_vel):
+        raise NotImplementedError
+    def global2bodyCoords(self):
+        raise NotImplementedError
+    def sample_initial_conditions(self,N):
+        n = len(self.body_graph.nodes)
+        angles_and_angvel = torch.randn(N,2,n) #(N,2,n)
+        return self.body2globalCoords(angles_and_angvel)
+
     def potential(self,x):
         """ Gravity potential """
         return (self.M@x)[...,1].sum(1)
