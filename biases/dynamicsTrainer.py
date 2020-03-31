@@ -15,8 +15,8 @@ from lie_conv.moleculeTrainer import BottleBlock, GlobalPool
 from lie_conv.utils import Expression, export, Named
 import numpy as np
 
-# from torchdiffeq import odeint
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint
+#from torchdiffeq import odeint_adjoint as odeint
 
 
 @export
@@ -80,10 +80,11 @@ def add_spectral_norm(module):
 
 @export
 class HNN(nn.Module,metaclass=Named):
-    def __init__(self,G,k=150,num_layers=3,**kwargs):
+    def __init__(self,G,k=150,num_layers=3,canonical=False,**kwargs):
         super().__init__(**kwargs)
         self.nfe = 0
         self.n = n = len(G.nodes)
+        self.canonical = False
         chs = [n] + num_layers * [k]
         self.potential_net = nn.Sequential(
             *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
@@ -94,25 +95,27 @@ class HNN(nn.Module,metaclass=Named):
             nn.Linear(chs[-1], n*n)
         )
     def Minv(self,q):
+        """ inputs: [q (bs,n,d)]. Outputs: [M^{-1}: (bs,n,k) -> (bs,n,k)]"""
         eps = 1e-4
         mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
         lower_diag = tril_mask(mass_L)*mass_L
         mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
         diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
         diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
-        clamped_lower =lower_diag*(1-mask) + diag*mask
+        clamped_lower = lower_diag*(1-mask) + diag*mask
         return clamped_lower@clamped_lower.transpose(-2,-1)
     def M(self,q):
+        """ inputs: [q (bs,n,d)]. Outputs: [M: (bs,n,k) -> (bs,n,k)]"""
         eps = 1e-4
         mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
         lower_diag = tril_mask(mass_L)*mass_L
         mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
         diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
         diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
-        clamped_lower =lower_diag*(1-mask) + diag*mask
+        clamped_lower = lower_diag*(1-mask) + diag*mask
         return lambda v: torch.cholesky_solve(v,clamped_lower)
     def H(self, t, z):
-        """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
+        """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
         D = z.shape[-1]  # of ODE dims, 2*num_particles*space_dim
         bs = z.shape[0]
         q = z[:, : D // 2].reshape(bs, self.n, -1)
@@ -123,22 +126,26 @@ class HNN(nn.Module,metaclass=Named):
         return T + V
 
     def forward(self, t, z, wgrad=True):
+        """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
         self.nfe+=1
         dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
         return dynamics(t, z)
 
     def compute_V(self, q):
+        """ inputs: [q (bs,n,d)] outputs: [V (bs,)]"""
         return self.potential_net(q.squeeze(-1)).squeeze(-1)
 
     def integrate(self, z0, ts, tol=1e-4):
-        """  """
+        """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvs (bs,T,2,n,d)]"""
+        #print(z0.shape)
         bs = z0.shape[0]
-        p = self.M(z0[:, 0])(z0[:, 1])
+        #print(self.Minv(z0[:, 0]).shape,z0[:, 1].shape)
+        p = z0[:,1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
         xp = torch.stack([z0[:, 0], p], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
-        xps = xpt.permute(1, 0, 2).reshape(bs*len(ts), *z0.shape[1:])
-        #print(xps[:, :, 1].shape,self.Minv(xps[:, :, 0]).shape)
-        vs = (self.Minv(xps[:, :, 0]) @ xps[:, :, 1])
+        xpt = odeint(self, xp, ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        xps = xpt.reshape(bs*len(ts), *z0.shape[1:])
+        #print(self.Minv(xps[:, :, 0]).shape,xps[:, :, 1].shape)
+        vs = zps[:,:,1] if self.canonical else (self.Minv(xps[:, :, 0]) @ xps[:, :, 1])
         xvs = torch.stack([xps[:, :, 0], vs], dim=1).reshape(bs,len(ts),*z0.shape[1:])
         return xvs
 
