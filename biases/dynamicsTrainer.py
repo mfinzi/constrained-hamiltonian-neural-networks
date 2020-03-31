@@ -50,6 +50,9 @@ def logspace(a, b, k):
     return np.exp(np.linspace(np.log(a), np.log(b), k))
 
 
+def FCtanh(chin, chout):
+    return nn.Sequential(nn.Linear(chin, chout), nn.Tanh())#Swish())
+
 def FCswish(chin, chout):
     return nn.Sequential(nn.Linear(chin, chout), Swish())
 
@@ -61,12 +64,89 @@ def tril_mask(square_mat):
     return coords <= coords.view(n, 1)
 
 
+from torch.nn.utils import spectral_norm
+def add_spectral_norm(module):
+    if isinstance(module,  (nn.ConvTranspose1d,
+                            nn.ConvTranspose2d,
+                            nn.ConvTranspose3d,
+                            nn.Conv1d,
+                            nn.Conv2d,
+                            nn.Conv3d)):
+        spectral_norm(module,dim = 1)
+        #print("SN on conv layer: ",module)
+    elif isinstance(module, nn.Linear):
+        spectral_norm(module,dim = 0)
+        #print("SN on linear layer: ",module)
+
+@export
+class HNN(nn.Module,metaclass=Named):
+    def __init__(self,G,k=150,num_layers=3,**kwargs):
+        super().__init__(**kwargs)
+        self.nfe = 0
+        self.n = n = len(G.nodes)
+        chs = [n] + num_layers * [k]
+        self.potential_net = nn.Sequential(
+            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
+            nn.Linear(chs[-1], 1)
+        )
+        self.mass_net = nn.Sequential(
+            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
+            nn.Linear(chs[-1], n*n)
+        )
+    def Minv(self,q):
+        eps = 1e-4
+        mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
+        lower_diag = tril_mask(mass_L)*mass_L
+        mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
+        diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
+        diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
+        clamped_lower =lower_diag*(1-mask) + diag*mask
+        return clamped_lower@clamped_lower.transpose(-2,-1)
+    def M(self,q):
+        eps = 1e-4
+        mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
+        lower_diag = tril_mask(mass_L)*mass_L
+        mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
+        diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
+        diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
+        clamped_lower =lower_diag*(1-mask) + diag*mask
+        return lambda v: torch.cholesky_solve(v,clamped_lower)
+    def H(self, t, z):
+        """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
+        D = z.shape[-1]  # of ODE dims, 2*num_particles*space_dim
+        bs = z.shape[0]
+        q = z[:, : D // 2].reshape(bs, self.n, -1)
+        p = z[:, D // 2 :].reshape(bs, self.n, -1)
+        Minv = self.Minv(q)
+        T = EuclideanT(p, Minv)
+        V = self.compute_V(q)
+        return T + V
+
+    def forward(self, t, z, wgrad=True):
+        self.nfe+=1
+        dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
+        return dynamics(t, z)
+
+    def compute_V(self, q):
+        return self.potential_net(q.squeeze(-1)).squeeze(-1)
+
+    def integrate(self, z0, ts, tol=1e-4):
+        """  """
+        bs = z0.shape[0]
+        p = self.M(z0[:, 0])(z0[:, 1])
+        xp = torch.stack([z0[:, 0], p], dim=1).reshape(bs, -1)
+        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
+        xps = xpt.permute(1, 0, 2).reshape(bs*len(ts), *z0.shape[1:])
+        #print(xps[:, :, 1].shape,self.Minv(xps[:, :, 0]).shape)
+        vs = (self.Minv(xps[:, :, 0]) @ xps[:, :, 1])
+        xvs = torch.stack([xps[:, :, 0], vs], dim=1).reshape(bs,len(ts),*z0.shape[1:])
+        return xvs
+
 class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
-    def __init__(self, G,constrained=True, **kwargs):
+    def __init__(self, G, **kwargs):
         super().__init__(**kwargs)
         self.G = G
         self.nfe = 0
-        self.constrained = constrained
         self.n = len(self.G.nodes())
         self._m_lower = torch.nn.Parameter(torch.eye(self.n))
 
@@ -97,21 +177,19 @@ class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
         return rigid_DPhi(self.G, self.Minv[None], z)
 
     def forward(self, t, z, wgrad=True):
-        if self.constrained:
-            dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=wgrad)
-        else:
-            dynamics = HamiltonianDynamics(self.H,wgrad=wgrad)
+        self.nfe+=1
+        dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=wgrad)
         return dynamics(t, z)
 
     def compute_V(self, q):
         raise NotImplementedError
 
-    def integrate(self, z0, ts, tol=1e-6):
+    def integrate(self, z0, ts, tol=1e-4):
         """ inputs [z0: (bs, z_dim), ts: (bs, T), sys_params: (bs, n, c)]
             outputs pred_zs: (bs, T, z_dim) """
         bs = z0.shape[0]
         xp = torch.stack([z0[:, 0], self.M(z0[:, 1])], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
+        xpt = odeint(self, xp, ts, rtol=tol)#, method="rk4")
         xps = xpt.permute(1, 0, 2).reshape(bs, len(ts), *z0.shape[1:])
         xvs = torch.stack([xps[:, :, 0], self.Minv @ xps[:, :, 1]], dim=2)
         return xvs
@@ -151,14 +229,15 @@ class FC(nn.Module, metaclass=Named):
 
 @export
 class CHFC(CHNN):
-    def __init__(self, G,constrained=True, k=150, num_layers=4, d=2):
-        super().__init__(G,constrained)
+    def __init__(self, G, k=150, num_layers=4, d=2):
+        super().__init__(G)
         n = len(G.nodes())
         chs = [n * d] + num_layers * [k]
         self.net = nn.Sequential(
-            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
+            *[FCtanh(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1)
         )
+        #self.apply(add_spectral_norm)
 
     def compute_V(self, x):
         """ Input is a canonical position variable and the system parameters,
@@ -168,37 +247,12 @@ class CHFC(CHNN):
 
 @export
 class CHLC(CHNN, LieResNet):
-    def __init__(
-        self,
-        G,
-        d=2,
-        bn=False,
-        num_layers=4,
-        group=Trivial(2),
-        k=384,
-        knn=False,
-        nbhd=100,
-        mean=True,
-        **kwargs
-    ):
+    def __init__(self,G,d=2,bn=False,num_layers=4,group=Trivial(2),
+                    k=384,knn=False,nbhd=100,mean=True,**kwargs):
         chin = len(G.nodes())
-        super().__init__(
-            G=G,
-            chin=chin,
-            ds_frac=1,
-            num_layers=num_layers,
-            nbhd=nbhd,
-            mean=mean,
-            bn=bn,
-            xyz_dim=d,
-            group=group,
-            fill=1.0,
-            k=k,
-            num_outputs=1,
-            cache=True,
-            knn=knn,
-            **kwargs
-        )
+        super().__init__(G=G,chin=chin,ds_frac=1,num_layers=num_layers,
+            nbhd=nbhd,mean=mean,bn=bn,xyz_dim=d,group=group,fill=1.0,
+            k=k,num_outputs=1,cache=True,knn=knn,**kwargs)
         self.nfe = 0
 
     def compute_V(self, x):

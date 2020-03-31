@@ -10,7 +10,7 @@ from biases.hamiltonian import ChainPendulum
 import biases.datasets as datasets
 import biases.dynamicsTrainer as dynamicsTrainer
 from biases.datasets import RigidBodyDataset
-from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer
+from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer, HNN
 import lie_conv.lieGroups as lieGroups
 
 # from lie_conv.dynamics_trial import DynamicsTrial
@@ -35,8 +35,11 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,
                      dt=dt, integration_time=10,angular_coords=angular)
     with FixedNumpySeed(0):
         datasets = split_dataset(dataset, splits)
-    d = 1 if angular else 2
-    model = network(G=dataset.body.body_graph,constrained=not angular,d=d,**net_cfg).to(device=device, dtype=dtype)
+    if angular:
+        model = HNN(G=dataset.body.body_graph,**net_cfg).to(device=device, dtype=dtype)
+    else:
+        model = network(G=dataset.body.body_graph,d=2,**net_cfg).to(device=device, dtype=dtype)
+
     # Create train and Dev(Test) dataloaders and move elems to gpu
     dataloaders = {k: LoaderTo(
                 DataLoader(v, batch_size=min(bs, splits[k]), num_workers=0, shuffle=(k == "train")),
