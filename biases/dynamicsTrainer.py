@@ -56,6 +56,9 @@ def FCtanh(chin, chout):
 def FCswish(chin, chout):
     return nn.Sequential(nn.Linear(chin, chout), Swish())
 
+def FCsoftplus(chin, chout):
+    return nn.Sequential(nn.Linear(chin, chout), nn.Softplus())
+
 
 def tril_mask(square_mat):
     n = square_mat.size(-1)
@@ -78,52 +81,53 @@ def add_spectral_norm(module):
         spectral_norm(module,dim = 0)
         #print("SN on linear layer: ",module)
 
+
+class Reshape(nn.Module):
+    def __init__(self, *args):
+        super(Reshape, self).__init__()
+        self.shape = args
+
+    def forward(self, x):
+        return x.view(self.shape)
+
 @export
 class HNN(nn.Module,metaclass=Named):
-    def __init__(self,G,k=150,num_layers=3,canonical=False,**kwargs):
+    def __init__(self,G,hidden_size=150,num_layers=3,canonical=False,**kwargs):
         super().__init__(**kwargs)
+        # Number of function evaluations
         self.nfe = 0
+        # Number of degrees of freedom
         self.n = n = len(G.nodes)
-        self.canonical = False
-        chs = [n] + num_layers * [k]
+        # Whether we use canonical momentum p instead of v
+        self.canonical = canonical
+        chs = [n] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
             *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], 1)
+            nn.Linear(chs[-1], 1),
+            Reshape(-1)
         )
         self.mass_net = nn.Sequential(
             *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], n*n)
+            nn.Linear(chs[-1], n*n),
+            Reshape(-1, n, n)
         )
     def Minv(self,q):
         """ inputs: [q (bs,n,d)]. Outputs: [M^{-1}: (bs,n,k) -> (bs,n,k)]"""
-        eps = 1e-4
-        mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
-        lower_diag = tril_mask(mass_L)*mass_L
-        mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
-        diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
-        diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
-        clamped_lower = lower_diag*(1-mask) + diag*mask
-        return clamped_lower@clamped_lower.transpose(-2,-1)
+        bs, n, d = q.shape
+        eps = 1e-1
+        lower_tri = self.mass_net(q.squeeze(-1)).triu().transpose(-1, -2)
+        return lambda p: lower_tri @ (lower_tri.transpose(-1, -2) @ p) + eps * p
+
     def M(self,q):
         """ inputs: [q (bs,n,d)]. Outputs: [M: (bs,n,k) -> (bs,n,k)]"""
-        eps = 1e-4
-        mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
-        lower_diag = tril_mask(mass_L)*mass_L
-        mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
-        diag = torch.where(lower_diag>eps,lower_diag,eps*torch.ones_like(lower_diag))
-        diag = torch.where(diag<-eps,diag,-eps*torch.ones_like(diag))
-        clamped_lower = lower_diag*(1-mask) + diag*mask
-        return lambda v: torch.cholesky_solve(v,clamped_lower)
-    def H(self, t, z):
-        """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
-        D = z.shape[-1]  # of ODE dims, 2*num_particles*space_dim
-        bs = z.shape[0]
-        q = z[:, : D // 2].reshape(bs, self.n, -1)
-        p = z[:, D // 2 :].reshape(bs, self.n, -1)
-        Minv = self.Minv(q)
-        T = EuclideanT(p, Minv)
-        V = self.compute_V(q)
-        return T + V
+        bs, n, d = q.shape
+        eps = 1e-1
+        lower_tri = self.mass_net(q.squeeze(-1)).triu().transpose(-1, -2)
+        # Solve Mq = p using QR where M = LL^T + eps*I
+        Q, R = torch.qr(torch.cat([lower_tri, eps *
+            torch.eye(n, device=q.device).unsqueeze(0).expand(bs, n, n)], dim=-2))
+        Q = Q[:, :n]
+        return lambda v: (v - Q@(Q.transpose(-1, -2) @ v))/eps
 
     def forward(self, t, z, wgrad=True):
         """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
@@ -131,23 +135,31 @@ class HNN(nn.Module,metaclass=Named):
         dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
         return dynamics(t, z)
 
+    def H(self, t, z):
+        """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
+        D = z.shape[-1]  # of ODE dims, 2*num_particles*space_dim
+        bs = z.shape[0]
+        q = z[:, : D // 2].reshape(bs, self.n, -1)
+        p = z[:, D // 2 :].reshape(bs, self.n, -1)
+        Minv = self.Minv(q)
+        T = EuclideanT(p, Minv, function=True)
+        V = self.compute_V(q)
+        return T + V
+
     def compute_V(self, q):
         """ inputs: [q (bs,n,d)] outputs: [V (bs,)]"""
-        return self.potential_net(q.squeeze(-1)).squeeze(-1)
+        return self.potential_net(q.squeeze(-1))
 
     def integrate(self, z0, ts, tol=1e-4):
-        """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvs (bs,T,2,n,d)]"""
-        #print(z0.shape)
+        """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvt (bs,T,2,n,d)]"""
         bs = z0.shape[0]
-        #print(self.Minv(z0[:, 0]).shape,z0[:, 1].shape)
-        p = z0[:,1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
-        xp = torch.stack([z0[:, 0], p], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp, ts, rtol=tol, method="rk4").permute(1, 0, 2)
-        xps = xpt.reshape(bs*len(ts), *z0.shape[1:])
-        #print(self.Minv(xps[:, :, 0]).shape,xps[:, :, 1].shape)
-        vs = zps[:,:,1] if self.canonical else (self.Minv(xps[:, :, 0]) @ xps[:, :, 1])
-        xvs = torch.stack([xps[:, :, 0], vs], dim=1).reshape(bs,len(ts),*z0.shape[1:])
-        return xvs
+        p0 = z0[:,1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
+        xp0 = torch.stack([z0[:, 0], p0], dim=1).reshape(bs, -1)
+        xpt = odeint(self, xp0, ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        xpt = xpt.reshape(bs*len(ts), *z0.shape[1:])
+        vt = xpt[:,1] if self.canonical else self.Minv(xpt[:, 0])(xpt[:, 1])
+        xvt = torch.stack([xpt[:, 0], vt], dim=1).reshape(bs,len(ts),*z0.shape[1:])
+        return xvt
 
 class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
     def __init__(self, G, **kwargs):

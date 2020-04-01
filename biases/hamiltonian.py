@@ -111,10 +111,13 @@ def Proj(DPhi):
     return _P
 
 
-def EuclideanT(p, Minv):
+def EuclideanT(p, Minv, function=False):
     """ Shape (bs,n,d), and (bs,n,n),
         standard \sum_n pT Minv p/2 kinetic energy"""
-    return (p * (Minv @ p)).sum(-1).sum(-1) / 2
+    if function:
+        return (p * Minv(p)).sum(-1).sum(-1) / 2
+    else:
+        return (p * (Minv @ p)).sum(-1).sum(-1) / 2
 
 
 class RigidBody(object, metaclass=Named):
