@@ -17,17 +17,8 @@ class RigidBodyDataset(Dataset, metaclass=Named):
     space_dim = 2
     num_targets = 1
 
-    def __init__(
-        self,
-        root_dir=None,
-        body=ChainPendulum(3),
-        n_systems=100,
-        regen=False,
-        chunk_len=5,
-        dt=0.1,
-        integration_time=50,
-        angular_coords=False,
-    ):
+    def __init__(self,root_dir=None,body=ChainPendulum(3),n_systems=100,regen=False,
+                chunk_len=5,dt=0.1,integration_time=50,angular_coords=False):
         super().__init__()
         root_dir = root_dir or os.path.expanduser(
             f"~/datasets/ODEDynamics/{self.__class__}/"
@@ -93,7 +84,6 @@ class RigidBodyDataset(Dataset, metaclass=Named):
     def sample_system(self, N):
         """"""
         return self.body.sample_initial_conditions(N)
-
 
 class CartpoleDataset(Dataset):
     def __init__(
