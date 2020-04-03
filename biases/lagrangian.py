@@ -27,7 +27,7 @@ class LagrangianDynamics(nn.Module):
             q = q + torch.zeros_like(q, requires_grad=True)
             v = v + torch.zeros_like(v, requires_grad=True)
             z = torch.cat([q, v], dim=-1)
-            L = self.L(z).sum()  # elements in mb are independent, gives mb gradients
+            L = self.L(t, z).sum()  # elements in mb are independent, gives mb gradients
             dL_dz = grad(L, z, create_graph=True)[0]  # gradient
             dL_dq = dL_dz[..., :d]
             dL_dv = dL_dz[..., d:]
