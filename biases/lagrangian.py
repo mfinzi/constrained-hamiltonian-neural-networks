@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint
 from torch.autograd import grad
+from typing import Callable
+from torch import Tensor
 
 
 class LagrangianDynamics(nn.Module):
@@ -10,13 +12,13 @@ class LagrangianDynamics(nn.Module):
     If wgrad=True, the dynamics can be backproped.
     """
 
-    def __init__(self, L, wgrad=False):
+    def __init__(self, L: Callable[[Tensor, Tensor], Tensor], wgrad: bool = False):
         super().__init__()
         self.L = L
         self.wgrad = wgrad
         self.nfe = 0
 
-    def forward(self, t, z):
+    def forward(self, t: Tensor, z: Tensor) -> Tensor:
         two_d = z.shape[-1]
         d = two_d // 2
         with torch.enable_grad():
@@ -47,14 +49,16 @@ class LagrangianDynamics(nn.Module):
         return dynamics
 
 
-def PendulumLagrangian(z):
+def PendulumLagrangian(z: Tensor):
     q = z[..., 0]
     v = z[..., 1]
     return v * v / 2 + (q.cos() - 1)
 
 
-def LagrangianFlow(L, z0, T, higher=False):
-    def dynamics(t, z):
+def LagrangianFlow(
+    L: Callable[[Tensor, Tensor], Tensor], z0: Tensor, T: Tensor, higher: bool = False
+) -> Tensor:
+    def dynamics(t: Tensor, z: Tensor):
         return LagrangianDynamics(L, higher)(t, z)
 
     return odeint(dynamics, z0, T, rtol=1e-6).permute(1, 0, 2)
