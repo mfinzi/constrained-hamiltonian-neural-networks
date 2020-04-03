@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint
 from torch.autograd import grad
 
 
