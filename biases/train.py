@@ -10,7 +10,7 @@ from biases.hamiltonian import ChainPendulum
 import biases.datasets as datasets
 import biases.dynamicsTrainer as dynamicsTrainer
 from biases.datasets import RigidBodyDataset
-from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer, HNN
+from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer
 import lie_conv.lieGroups as lieGroups
 
 # from lie_conv.dynamics_trial import DynamicsTrial
@@ -31,12 +31,12 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,
         device=torch.device("cuda"), bs=200,num_epochs=100,trainer_config={}):
     # Create Training set and model
     splits = {"train": n_train, "val": 200, "test": 200}
-    dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=ChainPendulum(2),
+    dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=ChainPendulum(1),
                      dt=dt, integration_time=10,angular_coords=angular)
     with FixedNumpySeed(0):
         datasets = split_dataset(dataset, splits)
     if angular:
-        model = HNN(G=dataset.body.body_graph,**net_cfg).to(device=device, dtype=dtype)
+        model = network(G=dataset.body.body_graph,**net_cfg).to(device=device, dtype=dtype)
     else:
         model = network(G=dataset.body.body_graph,d=2,**net_cfg).to(device=device, dtype=dtype)
 
@@ -54,7 +54,8 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,
 
 Trial = train_trial(makeTrainer)
 if __name__ == "__main__":
-    defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
-    defaults["save"] = False
-    defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
-    print(Trial(argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))))
+    with FixedNumpySeed(0):
+        defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
+        defaults["save"] = False
+        defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
+        print(Trial(argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))))

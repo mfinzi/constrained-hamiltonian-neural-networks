@@ -9,6 +9,7 @@ from biases.hamiltonian import (
     EuclideanT,
     rigid_DPhi,
 )
+from biases.lagrangian import LagrangianDynamics
 from lie_conv.lieConv import pConvBNrelu, PointConv, Pass, Swish, LieResNet
 from lie_conv.lieGroups import Trivial, T
 from lie_conv.moleculeTrainer import BottleBlock, GlobalPool
@@ -51,7 +52,7 @@ def logspace(a, b, k):
 
 
 def FCtanh(chin, chout):
-    return nn.Sequential(nn.Linear(chin, chout), nn.Tanh())#Swish())
+    return nn.Sequential(nn.Linear(chin, chout), nn.Tanh())
 
 def FCswish(chin, chout):
     return nn.Sequential(nn.Linear(chin, chout), Swish())
@@ -91,75 +92,34 @@ class Reshape(nn.Module):
         return x.view(self.shape)
 
 @export
-class HNN(nn.Module,metaclass=Named):
-    def __init__(self,G,hidden_size=150,num_layers=3,canonical=False,**kwargs):
+class LNN(nn.Module,metaclass=Named):
+    def __init__(self,G,hidden_size=256,num_layers=4,**kwargs):
         super().__init__(**kwargs)
         # Number of function evaluations
         self.nfe = 0
         # Number of degrees of freedom
         self.n = n = len(G.nodes)
-        # Whether we use canonical momentum p instead of v
-        self.canonical = canonical
-        chs = [n] + num_layers * [hidden_size]
-        self.potential_net = nn.Sequential(
-            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
+        chs = [2*n] + num_layers * [hidden_size]
+        self.net = nn.Sequential(
+            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
             Reshape(-1)
         )
-        self.mass_net = nn.Sequential(
-            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], n*n),
-            Reshape(-1, n, n)
-        )
-    def Minv(self,q):
-        """ inputs: [q (bs,n,d)]. Outputs: [M^{-1}: (bs,n,k) -> (bs,n,k)]"""
-        bs, n, d = q.shape
-        eps = 1e-1
-        lower_tri = self.mass_net(q.squeeze(-1)).triu().transpose(-1, -2)
-        return lambda p: lower_tri @ (lower_tri.transpose(-1, -2) @ p) + eps * p
-
-    def M(self,q):
-        """ inputs: [q (bs,n,d)]. Outputs: [M: (bs,n,k) -> (bs,n,k)]"""
-        bs, n, d = q.shape
-        eps = 1e-1
-        lower_tri = self.mass_net(q.squeeze(-1)).triu().transpose(-1, -2)
-        # Solve Mq = p using QR where M = LL^T + eps*I
-        Q, R = torch.qr(torch.cat([lower_tri, eps *
-            torch.eye(n, device=q.device).unsqueeze(0).expand(bs, n, n)], dim=-2))
-        Q = Q[:, :n]
-        return lambda v: (v - Q@(Q.transpose(-1, -2) @ v))/eps
-
     def forward(self, t, z, wgrad=True):
         """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
         self.nfe+=1
-        dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
+        dynamics = LagrangianDynamics(self.L,wgrad=wgrad)
         return dynamics(t, z)
 
-    def H(self, t, z):
+    def L(self,z):
         """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
-        D = z.shape[-1]  # of ODE dims, 2*num_particles*space_dim
-        bs = z.shape[0]
-        q = z[:, : D // 2].reshape(bs, self.n, -1)
-        p = z[:, D // 2 :].reshape(bs, self.n, -1)
-        Minv = self.Minv(q)
-        T = EuclideanT(p, Minv, function=True)
-        V = self.compute_V(q)
-        return T + V
-
-    def compute_V(self, q):
-        """ inputs: [q (bs,n,d)] outputs: [V (bs,)]"""
-        return self.potential_net(q.squeeze(-1))
+        return self.net(z.squeeze(-1))
 
     def integrate(self, z0, ts, tol=1e-4):
         """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvt (bs,T,2,n,d)]"""
         bs = z0.shape[0]
-        p0 = z0[:,1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
-        xp0 = torch.stack([z0[:, 0], p0], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp0, ts, rtol=tol, method="rk4").permute(1, 0, 2)
-        xpt = xpt.reshape(bs*len(ts), *z0.shape[1:])
-        vt = xpt[:,1] if self.canonical else self.Minv(xpt[:, 0])(xpt[:, 1])
-        xvt = torch.stack([xpt[:, 0], vt], dim=1).reshape(bs,len(ts),*z0.shape[1:])
-        return xvt
+        xvt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        return xvt.reshape(bs,len(ts),*z0.shape[1:])
 
 class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
     def __init__(self, G, **kwargs):
