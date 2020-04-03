@@ -100,6 +100,7 @@ class LNN(nn.Module,metaclass=Named):
         # Number of degrees of freedom
         self.n = n = len(G.nodes)
         chs = [2*n] + num_layers * [hidden_size]
+        print("LNN currently ignores time as an input")
         self.net = nn.Sequential(
             *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
@@ -111,7 +112,7 @@ class LNN(nn.Module,metaclass=Named):
         dynamics = LagrangianDynamics(self.L,wgrad=wgrad)
         return dynamics(t, z)
 
-    def L(self,z):
+    def L(self,t, z):
         """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
         return self.net(z.squeeze(-1))
 
