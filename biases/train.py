@@ -25,12 +25,12 @@ except ImportError:
         ImportWarning,
     )
 
-
-def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,
+# network = HNN, LNN, FC, CHFC
+def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
         dataset=RigidBodyDataset,C=5,dt=0.1,dtype=torch.float32,angular=False,
         device=torch.device("cuda"), bs=200,num_epochs=100,trainer_config={}):
     # Create Training set and model
-    splits = {"train": n_train, "val": 200, "test": 200}
+    splits = {"train": n_train,"test": 200}
     dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=ChainPendulum(1),
                      dt=dt, integration_time=10,angular_coords=angular)
     with FixedNumpySeed(0):
