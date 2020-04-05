@@ -36,7 +36,7 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=1e-2,n_train=500,regen=False,
     with FixedNumpySeed(0):
         datasets = split_dataset(dataset, splits)
     if angular:
-        model = network(G=dataset.body.body_graph,**net_cfg).to(device=device, dtype=dtype)
+        model = network(G=dataset.body.body_graph,angular_dims=angular,**net_cfg).to(device=device, dtype=dtype)
     else:
         model = network(G=dataset.body.body_graph,d=2,**net_cfg).to(device=device, dtype=dtype)
 

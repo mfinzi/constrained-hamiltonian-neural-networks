@@ -13,6 +13,7 @@ from oil.utils.utils import Named, export, Expression, FixedNumpySeed
 from biases.hamiltonian import ChainPendulum, RigidBody
 from biases.utils import rel_err
 
+
 @export
 class RigidBodyDataset(Dataset, metaclass=Named):
     space_dim = 2

@@ -93,31 +93,37 @@ class Reshape(nn.Module):
 
 @export
 class LNN(nn.Module,metaclass=Named):
-    def __init__(self,G,hidden_size=256,num_layers=4,angular_dims=None,**kwargs):
+    def __init__(self,G,hidden_size=256,num_layers=4,angular_dims=[],**kwargs):
         super().__init__(**kwargs)
         # Number of function evaluations
         self.nfe = 0
         # Number of degrees of freedom
         self.n = n = len(G.nodes)
         chs = [2*n] + num_layers * [hidden_size]
+        print("LNN currently ignores time as an input")
         self.net = nn.Sequential(
             *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
             Reshape(-1)
         )
+        self.angular_dims = list(range(n)) if angular_dims==True else angular_dims
     def forward(self, t, z, wgrad=True):
         """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
         self.nfe+=1
         dynamics = LagrangianDynamics(self.L,wgrad=wgrad)
+        #print(t.shape)
+        #print(z.shape)
         return dynamics(t, z)
 
-    def L(self,t,z):
+    def L(self,t, z):
         """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
         D = z.shape[-1]//2
         theta_mod = (z[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
         not_angular_dims = list(set(range(D))-set(self.angular_dims))
-        z_mod = torch.cat([theta_mod,not_angular_dims,z[...,D:]],dim=-1)
-        return self.net(z_mod)
+        not_angular_q = z[...,not_angular_dims]
+        p = z[...,D:]
+        z_mod = torch.cat([theta_mod,not_angular_q,p],dim=-1)
+        return self.net(z_mod) + 1e-3*(p*p).sum(-1)
 
     def integrate(self, z0, ts, tol=1e-4):
         """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvt (bs,T,2,n,d)]"""
@@ -126,7 +132,87 @@ class LNN(nn.Module,metaclass=Named):
         return xvt.reshape(bs,len(ts),*z0.shape[1:])
 
 @export
-class LNN(nn.Module,metaclass=Named):
+class HNN(nn.Module,metaclass=Named):
+    def __init__(self,G,k=150,num_layers=3,canonical=False,angular_dims=[],**kwargs):
+        super().__init__(**kwargs)
+        self.nfe = 0
+        self.n = n = len(G.nodes)
+        self.canonical = False
+        chs = [n] + num_layers * [k]
+        self.potential_net = nn.Sequential(
+            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
+            nn.Linear(chs[-1], 1),
+            Reshape(-1)
+        )
+        self.mass_net = nn.Sequential(
+            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
+            nn.Linear(chs[-1], n*n),
+            Reshape(-1,n,n)
+        )
+        self.angular_dims = list(range(n)) if angular_dims==True else angular_dims
+    def Minv(self,q):
+        """ inputs: [q (bs,n,d)]. Outputs: [M^{-1}: (bs,n,k) -> (bs,n,k)]"""
+        eps = 1e-4
+        q = q.squeeze(-1)
+        D = q.shape[-1]
+        theta_mod = (q[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
+        not_angular_dims = list(set(range(D))-set(self.angular_dims))
+        not_angular_q = q[...,not_angular_dims]
+        q_mod = torch.cat([theta_mod,not_angular_q],dim=-1).reshape(-1, self.n)
+        mass_L = self.mass_net(q_mod).reshape(-1,self.n,self.n)
+        lower_diag = tril_mask(mass_L)*mass_L
+        mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
+        Minv = lower_diag@lower_diag.transpose(-2,-1)+eps*mask
+        return Minv
+    def M(self,q):
+        """ inputs: [q (bs,n,d)]. Outputs: [M: (bs,n,k) -> (bs,n,k)]"""
+        # eps = 1e-4
+        # mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
+        # lower_diag = tril_mask(mass_L)*mass_L
+        # mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
+        return lambda v: torch.solve(v,self.Minv(q))[0]
+    def H(self, t, z):
+        """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
+        """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
+        D = z.shape[-1]//2  # of ODE dims, 2*num_particles*space_dim
+        bs = z.shape[0]
+        q = z[:, : D]
+        theta_mod = (q[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
+        not_angular_dims = list(set(range(D))-set(self.angular_dims))
+        not_angular_q = q[...,not_angular_dims]
+        q_mod = torch.cat([theta_mod,not_angular_q],dim=-1).reshape(bs, self.n, -1)
+        V = self.compute_V(q_mod)
+        p = z[:, D:].reshape(bs, self.n, -1)
+        Minv = self.Minv(q)
+        T = EuclideanT(p, Minv)
+        return T + V
+
+    def forward(self, t, z, wgrad=True):
+        """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
+        self.nfe+=1
+        dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
+        return dynamics(t, z)
+
+    def compute_V(self, q):
+        """ inputs: [q (bs,n,d)] outputs: [V (bs,)]"""
+        return self.potential_net(q.squeeze(-1)).squeeze(-1)
+
+    def integrate(self, z0, ts, tol=1e-4):
+        """  """
+        """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvs (bs,T,2,n,d)]"""
+        bs = z0.shape[0]
+        p = self.M(z0[:, 0])(z0[:, 1])
+        p = z0[:,1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
+        xp = torch.stack([z0[:, 0], p], dim=1).reshape(bs, -1)
+        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
+        xps = xpt.permute(1, 0, 2).reshape(bs*len(ts), *z0.shape[1:])
+        vs = (self.Minv(xps[:, 0]) @ xps[:, 1])
+        xpt = odeint(self, xp, ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        xps = xpt.reshape(bs*len(ts), *z0.shape[1:])
+        vs = zps[:,1] if self.canonical else (self.Minv(xps[:, 0]) @ xps[:, 1])
+        xvs = torch.stack([xps[:, 0], vs], dim=1).reshape(bs,len(ts),*z0.shape[1:])
+        return xvs
+
 
 class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
     def __init__(self, G, **kwargs):
@@ -183,7 +269,7 @@ class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
 
 @export
 class FC(nn.Module, metaclass=Named):
-    def __init__(self, G, d=2, k=300, num_layers=4,angular_dims=[], **kwargs):
+    def __init__(self, G, d=1, k=300, num_layers=4,angular_dims=[], **kwargs):
         super().__init__()
         n = len(G.nodes())
         chs = [n * 2 * d] + num_layers * [k]
@@ -192,13 +278,14 @@ class FC(nn.Module, metaclass=Named):
             nn.Linear(chs[-1], 2 * d * n)
         )
         self.nfe = 0
-        self.angular_dims = angular_dims
+        self.angular_dims = list(range(n*d)) if angular_dims==True else angular_dims
 
     def forward(self, t, z, wgrad=True):
         D = z.shape[-1]//2
         theta_mod = (z[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
         not_angular_dims = list(set(range(D))-set(self.angular_dims))
-        z_mod = torch.cat([theta_mod,not_angular_dims,z[...,D:]],dim=-1)
+        not_angular_q = z[...,not_angular_dims]
+        z_mod = torch.cat([theta_mod,not_angular_q,z[...,D:]],dim=-1)
         return self.net(z_mod)
 
     def integrate(self, z0, ts, tol=1e-4):
