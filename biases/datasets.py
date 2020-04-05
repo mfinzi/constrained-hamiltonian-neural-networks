@@ -7,9 +7,10 @@ import numpy as np
 import warnings
 import h5py
 import os
+import networkx as nx
 from torch.utils.data import Dataset
 from oil.utils.utils import Named, export, Expression, FixedNumpySeed
-from biases.hamiltonian import ChainPendulum
+from biases.hamiltonian import ChainPendulum, RigidBody
 from biases.utils import rel_err
 
 @export
@@ -85,20 +86,23 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         """"""
         return self.body.sample_initial_conditions(N)
 
+
+class CartPole(RigidBody):
+    def __init__(self):
+        self.body_graph = nx.Graph()
+        # Masses (and length) can be ignored for now since we are
+        # only using the connectivity of the graph to
+        # calculate DPhi, the constraint matrix
+        self.body_graph.add_node(0,m=1,pos_cnstr=1) #(axis)
+        self.body_graph.add_node(1,m=1)
+        self.body_graph.add_edge(0,1,l=1)
+
 class CartpoleDataset(Dataset):
-    def __init__(
-        self,
-        root_dir=None,
-        body=None,
-        regen=False,
-        batch_size=100,
-        chunk_len=5,
-        time_limit=10,
-        seed=0,
-    ):
+    def __init__(self,root_dir=None,regen=False,batch_size=100,
+                    chunk_len=5,time_limit=10,seed=0):
         super().__init__()
+        self.body = CartPole()
         self.seed = seed
-        self.body = body
 
         root_dir = root_dir or os.path.expanduser(
             f"~/datasets/ODEDynamics/{self.__class__}/"
@@ -137,21 +141,21 @@ class CartpoleDataset(Dataset):
 
         def initialize_episode(self, physics):
             # replace https://github.com/deepmind/dm_control/blob/03bebdf9eea0cbab480aa4882adbc4184b850835/dm_control/suite/cartpole.py#L182
-            # physics.named.data.qpos["slider"][0] = np.array([0.0])
-            # physics.named.data.qpos["hinge_1"][0] = np.array([3.1415926 / 2])
-            # physics.named.data.qvel["slider"][0] = np.array([0.0])
-            # physics.named.data.qvel["hinge_1"][0] = np.array([0.0])
+            physics.named.data.qpos["slider"][0] = np.array([0.0])
+            physics.named.data.qpos["hinge_1"][0] = np.array([3.1415926 / 2])
+            physics.named.data.qvel["slider"][0] = np.array([0.0])
+            physics.named.data.qvel["hinge_1"][0] = np.array([0.0])
 
             # we'll use the default for Cartpole for now
             nv = physics.model.nv
-            if self._swing_up:
-                physics.named.data.qpos["slider"] = 0.01 * self.random.randn()
-                physics.named.data.qpos["hinge_1"] = np.pi + 0.01 * self.random.randn()
-                physics.named.data.qpos[2:] = 0.1 * self.random.randn(nv - 2)
-            else:
-                physics.named.data.qpos["slider"] = self.random.uniform(-0.1, 0.1)
-                physics.named.data.qpos[1:] = self.random.uniform(-0.034, 0.034, nv - 1)
-            physics.named.data.qvel[:] = 0.01 * self.random.randn(physics.model.nv)
+            #if self._swing_up:
+            #    physics.named.data.qpos["slider"] = 0.01 * self.random.randn()
+            #     physics.named.data.qpos["hinge_1"] = np.pi + 0.01 * self.random.randn()
+            #     physics.named.data.qpos[2:] = 0.1 * self.random.randn(nv - 2)
+            # else:
+            #     physics.named.data.qpos["slider"] = self.random.uniform(-0.1, 0.1)
+            #     physics.named.data.qpos[1:] = self.random.uniform(-0.034, 0.034, nv - 1)
+            # physics.named.data.qvel[:] = 0.01 * self.random.randn(physics.model.nv)
 
             # call function from super class which should be a dm_control.suite.base.Task
             # replaces `super(Balance, self).initialize_episode(physics)`
@@ -191,16 +195,17 @@ class CartpoleDataset(Dataset):
         time = time.view(1, -1).expand(batch_size, len(time))
 
         # ignore generalized_trajs for now
-        return time, cartesian_trajs
+        return time[:,::50], cartesian_trajs[:,::50]
 
     def _get_com(self, env, body):
-        # we only keep x and y
-        return np.copy(env.physics.named.data.xipos[body][:-1])
+        # we only keep x and z
+        #from IPython.core.debugger import set_trace; set_trace()
+        return np.copy(env.physics.named.data.xipos[body][[0,2]])
 
     def _get_cvel(self, env, body):
         # last three entries corresponding to translational velocity
-        # we only keep x and y
-        return np.copy(env.physics.named.data.cvel[body][-3:-1])
+        # we only keep x and z
+        return np.copy(env.physics.named.data.cvel[body][[-3,-1]])
 
     def _get_com_mom(self, env, body):
         return self._get_cvel(env, body) * env.physics.named.model.body_mass[body]
@@ -240,7 +245,7 @@ class CartpoleDataset(Dataset):
             cart_com_mom.append(self._get_com_mom(env, "cart"))
             pole_p.append(self._get_p(env, "hinge_1"))
             cart_p.append(self._get_p(env, "slider"))
-
+        
         pole_com, pole_com_mom, cart_com, cart_com_mom = map(
             np.stack, [pole_com, pole_com_mom, cart_com, cart_com_mom]
         )

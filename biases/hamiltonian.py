@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 import networkx as nx
 import functools
 from oil.utils.utils import Named, export, Expression
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint#odeint_adjoint as odeint
 
 
 class HamiltonianDynamics(nn.Module):
@@ -57,38 +57,37 @@ def rigid_DPhi(rigid_body_graph, Minv, z):
 
     G = rigid_body_graph
     tethers = nx.get_node_attributes(G, "tether")
-    E = len(G.edges)
-    ET = E + len(tethers)
+    pos_constraints = nx.get_node_attributes(G,'pos_cnstr')
+    NC = len(G.edges) + len(tethers) + len(pos_constraints) # total number of constraints
     v = Minv @ p
-    dphi_dx = torch.zeros(bs, n, d, ET, device=z.device, dtype=z.dtype)
-    dphi_dp = torch.zeros(bs, n, d, ET, device=z.device, dtype=z.dtype)
-    dphid_dx = torch.zeros(bs, n, d, ET, device=z.device, dtype=z.dtype)
-    dphid_dp = torch.zeros(bs, n, d, ET, device=z.device, dtype=z.dtype)
-    for eid, e in enumerate(G.edges):
+    dphi_dx = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
+    dphi_dp = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
+    dphid_dx = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
+    dphid_dp = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
+    cid=0 #constraint id
+    for e in G.edges:
         i, j = e
         # Fill out dphi/dx
-        dphi_dx[:, i, :, eid] = 2 * (x[:, i] - x[:, j])
-        dphi_dx[:, j, :, eid] = 2 * (x[:, j] - x[:, i])
+        dphi_dx[:, i, :, cid] = 2 * (x[:, i] - x[:, j])
+        dphi_dx[:, j, :, cid] = 2 * (x[:, j] - x[:, i])
         # Fill out d\dot{phi}/dx
-        dphid_dx[:, i, :, eid] = 2 * (v[:, i] - v[:, j])
-        dphid_dx[:, j, :, eid] = 2 * (v[:, j] - v[:, i])
+        dphid_dx[:, i, :, cid] = 2 * (v[:, i] - v[:, j])
+        dphid_dx[:, j, :, cid] = 2 * (v[:, j] - v[:, i])
         # Fill out d\dot{phi}/dp
-        dphid_dp[:, :, :, eid] = (
-            2 * (x[:, i] - x[:, j])[:, None, :] * (Minv[:, i] - Minv[:, j])[:, :, None]
-        )
-    for vid, (i, pos) in enumerate(tethers.items()):
+        dphid_dp[:, :, :, cid] = 2*(x[:,i] - x[:,j])[:,None,:]*(Minv[:,i]-Minv[:,j])[:,:,None]
+        cid +=1
+    for (i, pos) in tethers.items():
         ci = pos[None].to(x.device)
-        dphi_dx[:, i, :, vid + E] = 2 * (x[:, i] - ci)
-        dphid_dx[:, i, :, vid + E] = 2 * v[:, i]
-        dphid_dp[:, :, :, vid + E] = (
-            2 * (x[:, i] - ci)[:, None, :] * (Minv[:, i])[:, :, None]
-        )
-    dPhi_dx = torch.cat(
-        [dphi_dx.reshape(bs, n * d, ET), dphid_dx.reshape(bs, n * d, ET)], dim=2
-    )
-    dPhi_dp = torch.cat(
-        [dphi_dp.reshape(bs, n * d, ET), dphid_dp.reshape(bs, n * d, ET)], dim=2
-    )
+        dphi_dx[:, i, :, cid] = 2 * (x[:, i] - ci)
+        dphid_dx[:, i, :, cid] = 2 * v[:, i]
+        dphid_dp[:, :, :, cid] = 2 * (x[:, i] - ci)[:, None, :] * (Minv[:, i])[:, :, None]
+        cid +=1
+    for (i,axis) in pos_constraints.items():
+        dphi_dx[:, i, axis, cid] = 1
+        dphid_dp[:,:,axis,cid] = Minv[:, i]
+        cid +=1
+    dPhi_dx = torch.cat([dphi_dx.reshape(bs, n * d, NC), dphid_dx.reshape(bs, n * d, NC)], dim=2)
+    dPhi_dp = torch.cat([dphi_dp.reshape(bs, n * d, NC), dphid_dp.reshape(bs, n * d, NC)], dim=2)
     DPhi = torch.cat([dPhi_dx, dPhi_dp], dim=1)
     return DPhi
 
@@ -107,7 +106,6 @@ def Proj(DPhi):
         reg = 0  # 1e-4*torch.eye(DPhi.shape[-1],dtype=DPhi.dtype,device=DPhi.device)[None]
         X, _ = torch.solve(DPhiT @ M, DPhiT @ J(DPhi) + reg)
         return M - J(DPhi @ X)
-
     return _P
 
 
@@ -203,7 +201,7 @@ class RigidBody(object, metaclass=Named):
         xps = xpt.permute(1, 0, 2).reshape(bs, len(T), *z0.shape[1:])
         xvs = torch.stack([xps[:, :, 0], self.Minv.double() @ xps[:, :, 1]], dim=2)
         return xvs.to(z0.device)
-
+        
 
 class ChainPendulum(RigidBody):
     def __init__(self, links=2, beams=False, m=1, l=1):
@@ -250,7 +248,8 @@ class ChainPendulum(RigidBody):
         vx,vy = rel_pos_vel[:,1].T
         angle = torch.atan2(x,-y)
         omega = torch.where(angle<1e-2,vx/(-y),vy/x)
-        return torch.stack([angle,omega],dim=1)
+        angle_unwrapped = torch.from_numpy(np.unwrap(angle.numpy(),axis=0)).to(x.device,x.dtype)
+        return torch.stack([angle_unwrapped,omega],dim=1)
         
     def global2bodyCoords(self,global_pos_vel):
         N,_,n,d = global_pos_vel.shape

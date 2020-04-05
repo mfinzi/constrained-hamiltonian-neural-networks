@@ -93,7 +93,7 @@ class Reshape(nn.Module):
 
 @export
 class LNN(nn.Module,metaclass=Named):
-    def __init__(self,G,hidden_size=256,num_layers=4,**kwargs):
+    def __init__(self,G,hidden_size=256,num_layers=4,angular_dims=None,**kwargs):
         super().__init__(**kwargs)
         # Number of function evaluations
         self.nfe = 0
@@ -111,15 +111,22 @@ class LNN(nn.Module,metaclass=Named):
         dynamics = LagrangianDynamics(self.L,wgrad=wgrad)
         return dynamics(t, z)
 
-    def L(self,z):
+    def L(self,t,z):
         """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
-        return self.net(z.squeeze(-1))
+        D = z.shape[-1]//2
+        theta_mod = (z[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
+        not_angular_dims = list(set(range(D))-set(self.angular_dims))
+        z_mod = torch.cat([theta_mod,not_angular_dims,z[...,D:]],dim=-1)
+        return self.net(z_mod)
 
     def integrate(self, z0, ts, tol=1e-4):
         """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvt (bs,T,2,n,d)]"""
         bs = z0.shape[0]
         xvt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method="rk4").permute(1, 0, 2)
         return xvt.reshape(bs,len(ts),*z0.shape[1:])
+
+@export
+class LNN(nn.Module,metaclass=Named):
 
 class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
     def __init__(self, G, **kwargs):
@@ -176,7 +183,7 @@ class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
 
 @export
 class FC(nn.Module, metaclass=Named):
-    def __init__(self, G, d=2, k=300, num_layers=4, **kwargs):
+    def __init__(self, G, d=2, k=300, num_layers=4,angular_dims=[], **kwargs):
         super().__init__()
         n = len(G.nodes())
         chs = [n * 2 * d] + num_layers * [k]
@@ -185,25 +192,21 @@ class FC(nn.Module, metaclass=Named):
             nn.Linear(chs[-1], 2 * d * n)
         )
         self.nfe = 0
+        self.angular_dims = angular_dims
 
     def forward(self, t, z, wgrad=True):
-        D = z.shape[-1]
-        q = z[:, : D // 2].reshape(*m.shape, -1)
-        p = z[:, D // 2 :]
-        zm = torch.cat(
-            (
-                (q - q.mean(1, keepdims=True)).reshape(z.shape[0], -1),
-                p,
-                sysP.reshape(z.shape[0], -1),
-            ),
-            dim=1,
-        )
-        return self.net(zm)
+        D = z.shape[-1]//2
+        theta_mod = (z[...,self.angular_dims]+np.pi)%(2*np.pi) - np.pi
+        not_angular_dims = list(set(range(D))-set(self.angular_dims))
+        z_mod = torch.cat([theta_mod,not_angular_dims,z[...,D:]],dim=-1)
+        return self.net(z_mod)
 
-    def integrate(self, z0, ts, rtol=1e-4):
+    def integrate(self, z0, ts, tol=1e-4):
         """ inputs [z0: (bs, z_dim), ts: (bs, T), sys_params: (bs, n, c)]
             outputs pred_zs: (bs, T, z_dim) """
-        return odeint(self, z0, ts, rtol=rtol, method="rk4").permute(1, 0, 2)
+        bs = z0.shape[0]
+        zt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        return zt.reshape(bs,len(ts),*z0.shape[1:])
 
 
 @export
