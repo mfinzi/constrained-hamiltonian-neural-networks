@@ -64,7 +64,7 @@ if __name__ == "__main__":
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
         rollouts = trainer.test_rollouts(angular_to_euclidean=cfg['angular'])
-        fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np".replace('(','').replace(')','')
+        fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
         with open(fname,'wb') as f:
             pickle.dump(rollouts,f)
         #defaults["trainer_config"]["early_stop_metric"] = "val_MSE"

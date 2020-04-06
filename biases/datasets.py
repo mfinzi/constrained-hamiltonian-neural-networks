@@ -27,7 +27,7 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         )
         self.body = body
         filename = os.path.join(
-            root_dir, f"trajectories_N{n_systems}_dt{dt}_T{integration_time}.pz"
+            root_dir, f"trajectories_{body}_N{n_systems}_dt{dt}_T{integration_time}.pz"
         )
         if os.path.exists(filename) and not regen:
             ts, zs = torch.load(filename)
@@ -40,9 +40,9 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         if angular_coords:
             N,T = self.Zs.shape[:2]
             flat_Zs = self.Zs.reshape(N*T,*self.Zs.shape[2:])
-            self.Zs = self.body.global2bodyCoords(flat_Zs)
+            self.Zs = self.body.global2bodyCoords(flat_Zs.double())
             print(rel_err(self.body.body2globalCoords(self.Zs.squeeze(-1)),flat_Zs))
-            self.Zs = self.Zs.reshape(N,T,*self.Zs.shape[1:])
+            self.Zs = self.Zs.reshape(N,T,*self.Zs.shape[1:]).float()
 
 
     def __len__(self):

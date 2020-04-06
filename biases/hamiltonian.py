@@ -253,14 +253,15 @@ class ChainPendulum(RigidBody):
         
     def global2bodyCoords(self,global_pos_vel):
         N,_,n,d = global_pos_vel.shape
-        angles_omega = torch.zeros(N,2,n,device=global_pos_vel.device,dtype=global_pos_vel.dtype)
-        start_position_velocity = torch.zeros(N,2,d)
-        start_position_velocity[:,0,:] = self.body_graph.nodes[0]['tether'][None]
-        rel_pos_vel  = global_pos_vel[:,:,0] - start_position_velocity
+        *bsT2,n,d = global_pos_vel.shape
+        angles_omega = torch.zeros(*bsT2,n,device=global_pos_vel.device,dtype=global_pos_vel.dtype)
+        start_position_velocity = torch.zeros(*bsT2,d)
+        start_position_velocity[...,0,:] = self.body_graph.nodes[0]['tether'][None]
+        rel_pos_vel  = global_pos_vel[...,0,:] - start_position_velocity
         angles_omega[...,0] += self.cartesian2angle(rel_pos_vel)
         start_position_velocity += rel_pos_vel
         for (_,j), length in nx.get_edge_attributes(self.body_graph,'l').items():
-            rel_pos_vel  = global_pos_vel[:,:,j] - start_position_velocity
+            rel_pos_vel  = global_pos_vel[...,j,:] - start_position_velocity
             angles_omega[...,j] += self.cartesian2angle(rel_pos_vel)
             start_position_velocity += rel_pos_vel
         return angles_omega.unsqueeze(-1)
@@ -275,7 +276,7 @@ class ChainPendulum(RigidBody):
         return (self.M @ x)[..., 1].sum(1)
 
     def __str__(self):
-        return f"{self.__class__}({len(self.body_graph.nodes)})"
+        return f"{self.__class__}{len(self.body_graph.nodes)}"
     def __repr__(self):
         return str(self)
 
