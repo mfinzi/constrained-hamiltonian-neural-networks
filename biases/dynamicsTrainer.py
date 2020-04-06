@@ -46,6 +46,44 @@ class IntegratedDynamicsTrainer(Trainer):
         )
         super().logStuff(step, minibatch)
 
+    def test_rollouts(self,angular_to_euclidean=False,pert_eps=1e-4):
+        #self.model.double()
+        dataloader = self.dataloaders['test']
+        rel_errs = []
+        pert_rel_errs = []
+        with Eval(self.model), torch.no_grad():
+            for mb in dataloader:
+                z0,T = mb[0]# assume timesteps evenly spaced for now
+                T = T[0]
+                dT = (T[-1]-T[0])/len(T)
+                long_T = dT*torch.arange(50*len(T)).to(z0.device,z0.dtype)
+                zt_pred = self.model.integrate(z0,long_T)
+                bs,Nlong,*rest = zt_pred.shape
+                # add conversion from angular to euclidean
+                body = dataloader.dataset.body
+                if angular_to_euclidean:
+                    z0 = body.body2globalCoords(z0.squeeze(-1))
+                    flat_pred = body.body2globalCoords(zt_pred.reshape(bs*Nlong,*rest).squeeze(-1))
+                    zt_pred = flat_pred.reshape(bs,Nlong,*flat_pred.shape[1:])
+                zt = dataloader.dataset.body.integrate(z0,long_T)
+                perturbation = pert_eps*torch.randn_like(z0)/(zt**2).sum().sqrt()
+                zt_pert = dataloader.dataset.body.integrate(z0+perturbation,long_T)
+                # (bs,T,2,n,2)
+                rel_error = ((zt_pred-zt)**2).sum(-1).sum(-1).sum(-1).sqrt() \
+                                /((zt_pred+zt)**2).sum(-1).sum(-1).sum(-1).sqrt()
+                rel_errs.append(rel_error)
+                pert_rel_error = ((zt_pert-zt)**2).sum(-1).sum(-1).sum(-1).sqrt() \
+                                /((zt_pert+zt)**2).sum(-1).sum(-1).sum(-1).sqrt()
+                pert_rel_errs.append(pert_rel_error)
+            rel_errs = torch.cat(rel_errs,dim=0) # (D,T)
+            pert_rel_errs = torch.cat(pert_rel_errs,dim=0) # (D,T)
+            both = torch.stack([rel_errs,pert_rel_errs],dim=-1) # (D,T,2)
+        return both
+                
+                
+
+
+
 
 def logspace(a, b, k):
     return np.exp(np.linspace(np.log(a), np.log(b), k))
@@ -261,7 +299,7 @@ class CHNN(nn.Module, metaclass=Named):  # abstract Hamiltonian network class
             outputs pred_zs: (bs, T, z_dim) """
         bs = z0.shape[0]
         xp = torch.stack([z0[:, 0], self.M(z0[:, 1])], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp, ts, rtol=tol)#, method="rk4")
+        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
         xps = xpt.permute(1, 0, 2).reshape(bs, len(ts), *z0.shape[1:])
         xvs = torch.stack([xps[:, :, 0], self.Minv @ xps[:, :, 1]], dim=2)
         return xvs

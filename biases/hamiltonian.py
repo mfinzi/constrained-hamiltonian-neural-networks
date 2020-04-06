@@ -274,6 +274,10 @@ class ChainPendulum(RigidBody):
         """ Gravity potential """
         return (self.M @ x)[..., 1].sum(1)
 
+    def __str__(self):
+        return f"{self.__class__}({len(self.body_graph.nodes)})"
+    def __repr__(self):
+        return str(self)
 
 def jvp(y, x, v):
     with torch.enable_grad():

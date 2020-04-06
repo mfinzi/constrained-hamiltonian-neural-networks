@@ -12,7 +12,7 @@ import biases.dynamicsTrainer as dynamicsTrainer
 from biases.datasets import RigidBodyDataset
 from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer
 import lie_conv.lieGroups as lieGroups
-
+import pickle
 # from lie_conv.dynamics_trial import DynamicsTrial
 try:
     import lie_conv.graphnets as graphnets
@@ -27,11 +27,12 @@ except ImportError:
 
 # network = HNN, LNN, FC, CHFC
 def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
-        dataset=RigidBodyDataset,C=5,dt=0.1,dtype=torch.float32,angular=False,
-        device=torch.device("cuda"), bs=200,num_epochs=100,trainer_config={}):
+        dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,dt=0.1,
+        dtype=torch.float32,angular=False,device=torch.device("cuda"),
+         bs=200,num_epochs=100,trainer_config={}):
     # Create Training set and model
     splits = {"train": n_train,"test": 200}
-    dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=ChainPendulum(1),
+    dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=body,
                      dt=dt, integration_time=10,angular_coords=angular)
     with FixedNumpySeed(0):
         datasets = split_dataset(dataset, splits)
@@ -44,6 +45,7 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
     dataloaders = {k: LoaderTo(
                 DataLoader(v, batch_size=min(bs, splits[k]), num_workers=0, shuffle=(k == "train")),
                 device=device,dtype=dtype) for k, v in datasets.items()}
+    dataloaders["Train"] = dataloaders["train"]
     # Initialize optimizer and learning rate schedule
     opt_constr = lambda params: Adam(params, lr=lr)
     lr_sched = cosLr(num_epochs)
@@ -51,10 +53,18 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
                                      log_args={"timeFrac": 1 / 4, "minPeriod": 0.0},**trainer_config)
 
 
-Trial = train_trial(makeTrainer)
+#Trial = train_trial(makeTrainer)
 if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
-        defaults["save"] = False
+        #defaults["save"] = False
+        cfg = argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))
+        cfg.pop('local_rank')
+        trainer = makeTrainer(**cfg)
+        trainer.train(cfg['num_epochs'])
+        rollouts = trainer.test_rollouts(angular_to_euclidean=cfg['angular'])
+        fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np".replace('(','').replace(')','')
+        with open(fname,'wb') as f:
+            pickle.dump(rollouts,f)
         #defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
-        print(Trial(argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))))
+        #print(Trial()))
