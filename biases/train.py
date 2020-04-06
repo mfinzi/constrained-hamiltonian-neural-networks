@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam
 from oil.utils.utils import LoaderTo, islice, FixedNumpySeed, cosLr
 from biases.hamiltonian import ChainPendulum
+import biases.hamiltonian as hamiltonian
 import biases.datasets as datasets
 import biases.dynamicsTrainer as dynamicsTrainer
 from biases.datasets import RigidBodyDataset
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
         #defaults["save"] = False
-        cfg = argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))
+        cfg = argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets,hamiltonian))
         cfg.pop('local_rank')
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])

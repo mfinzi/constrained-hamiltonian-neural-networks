@@ -202,7 +202,7 @@ class RigidBody(object, metaclass=Named):
         xvs = torch.stack([xps[:, :, 0], self.Minv.double() @ xps[:, :, 1]], dim=2)
         return xvs.to(z0.device)
         
-
+@export
 class ChainPendulum(RigidBody):
     def __init__(self, links=2, beams=False, m=1, l=1):
         self.body_graph = nx.Graph()

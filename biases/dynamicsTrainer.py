@@ -47,13 +47,14 @@ class IntegratedDynamicsTrainer(Trainer):
         super().logStuff(step, minibatch)
 
     def test_rollouts(self,angular_to_euclidean=False,pert_eps=1e-4):
-        #self.model.double()
+        self.model.cpu().double()
         dataloader = self.dataloaders['test']
         rel_errs = []
         pert_rel_errs = []
         with Eval(self.model), torch.no_grad():
             for mb in dataloader:
                 z0,T = mb[0]# assume timesteps evenly spaced for now
+                z0 = z0.cpu().double()
                 T = T[0]
                 dT = (T[-1]-T[0])/len(T)
                 long_T = dT*torch.arange(50*len(T)).to(z0.device,z0.dtype)
@@ -66,7 +67,7 @@ class IntegratedDynamicsTrainer(Trainer):
                     flat_pred = body.body2globalCoords(zt_pred.reshape(bs*Nlong,*rest).squeeze(-1))
                     zt_pred = flat_pred.reshape(bs,Nlong,*flat_pred.shape[1:])
                 zt = dataloader.dataset.body.integrate(z0,long_T)
-                perturbation = pert_eps*torch.randn_like(z0)/(zt**2).sum().sqrt()
+                perturbation = pert_eps*torch.randn_like(z0)*(zt**2).sum().sqrt()
                 zt_pert = dataloader.dataset.body.integrate(z0+perturbation,long_T)
                 # (bs,T,2,n,2)
                 rel_error = ((zt_pred-zt)**2).sum(-1).sum(-1).sum(-1).sqrt() \
@@ -140,7 +141,7 @@ class LNN(nn.Module,metaclass=Named):
         chs = [2*n] + num_layers * [hidden_size]
         print("LNN currently ignores time as an input")
         self.net = nn.Sequential(
-            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
+            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
             Reshape(-1)
         )
@@ -161,7 +162,7 @@ class LNN(nn.Module,metaclass=Named):
         not_angular_q = z[...,not_angular_dims]
         p = z[...,D:]
         z_mod = torch.cat([theta_mod,not_angular_q,p],dim=-1)
-        return self.net(z_mod) + 1e-3*(p*p).sum(-1)
+        return self.net(z_mod) + 1e-1*(p*p).sum(-1)
 
     def integrate(self, z0, ts, tol=1e-4):
         """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvt (bs,T,2,n,d)]"""
