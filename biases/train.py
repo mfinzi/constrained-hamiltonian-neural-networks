@@ -44,7 +44,6 @@ def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
     dataloaders = {k: LoaderTo(
                 DataLoader(v, batch_size=min(bs, splits[k]), num_workers=0, shuffle=(k == "train")),
                 device=device,dtype=dtype) for k, v in datasets.items()}
-    dataloaders["Train"] = islice(dataloaders["train"], len(dataloaders["val"]))
     # Initialize optimizer and learning rate schedule
     opt_constr = lambda params: Adam(params, lr=lr)
     lr_sched = cosLr(num_epochs)
@@ -57,5 +56,5 @@ if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
         defaults["save"] = False
-        defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
+        #defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
         print(Trial(argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets))))
