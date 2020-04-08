@@ -6,7 +6,7 @@ import networkx as nx
 import functools
 from oil.utils.utils import Named, export, Expression
 from torchdiffeq import odeint#odeint_adjoint as odeint
-
+from biases.animation import Animation
 
 class HamiltonianDynamics(nn.Module):
     """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
@@ -117,7 +117,7 @@ def EuclideanT(p, Minv, function=False):
     else:
         return (p * (Minv @ p)).sum(-1).sum(-1) / 2
 
-
+@export
 class RigidBody(object, metaclass=Named):
     """ Two dimensional rigid body consisting of point masses on nodes (with zero inertia)
         and beams with mass and inertia connecting nodes. Edge inertia is interpreted as 
@@ -201,84 +201,19 @@ class RigidBody(object, metaclass=Named):
         xps = xpt.permute(1, 0, 2).reshape(bs, len(T), *z0.shape[1:])
         xvs = torch.stack([xps[:, :, 0], self.Minv.double() @ xps[:, :, 1]], dim=2)
         return xvs.to(z0.device)
-        
-@export
-class ChainPendulum(RigidBody):
-    def __init__(self, links=2, beams=False, m=1, l=1):
-        self.body_graph = nx.Graph()
-        if beams:
-            self.body_graph.add_node(
-                0, m=m, tether=torch.zeros(2), l=l
-            )  # TODO: massful tether
-            for i in range(1, links):
-                self.body_graph.add_node(i)
-                self.body_graph.add_edge(i - 1, i, m=m, I=1 / 12, l=l)
+
+    def animate(self,zt):
+        # bs, T, 2,n,d
+        if len(zt.shape)==5:
+            j = np.random.randint(zt.shape[0])
+            xt = zt[j,:,0,:,:]
         else:
-            self.body_graph.add_node(0, m=m, tether=torch.zeros(2), l=l)
-            for i in range(1, links):
-                self.body_graph.add_node(i, m=m)
-                self.body_graph.add_edge(i - 1, i, l=l)
-
-    def body2globalCoords(self, angles_omega):
-        d = 2
-        n = len(self.body_graph.nodes)
-        N = angles_omega.shape[0]
-        pvs = torch.zeros(N, 2, n, d)
-        global_position_velocity = torch.zeros(N, 2, d)
-        length = self.body_graph.nodes[0]["l"]
-        global_position_velocity[:, 0, :] = self.body_graph.nodes[0]["tether"][None]
-        global_position_velocity += self.joint2cartesian(length, angles_omega[..., 0])
-        pvs[:, :, 0] = global_position_velocity
-        for (_, j), length in nx.get_edge_attributes(self.body_graph, "l").items():
-            global_position_velocity += self.joint2cartesian(
-                length, angles_omega[..., j]
-            )
-            pvs[:, :, j] = global_position_velocity
-        return pvs
-
-    def joint2cartesian(self, length, angle_omega):
-        position_vel = torch.zeros(angle_omega.shape[0], 2, 2)
-        position_vel[:, 0, 0] = length * angle_omega[:, 0].sin()
-        position_vel[:, 1, 0] = length * angle_omega[:, 0].cos() * angle_omega[:, 1]
-        position_vel[:, 0, 1] = -length * angle_omega[:, 0].cos()
-        position_vel[:, 1, 1] = length * angle_omega[:, 0].sin() * angle_omega[:, 1]
-        return position_vel
-    def cartesian2angle(self,rel_pos_vel):
-        x,y = rel_pos_vel[:,0].T
-        vx,vy = rel_pos_vel[:,1].T
-        angle = torch.atan2(x,-y)
-        omega = torch.where(angle<1e-2,vx/(-y),vy/x)
-        angle_unwrapped = torch.from_numpy(np.unwrap(angle.numpy(),axis=0)).to(x.device,x.dtype)
-        return torch.stack([angle_unwrapped,omega],dim=1)
-        
-    def global2bodyCoords(self,global_pos_vel):
-        N,_,n,d = global_pos_vel.shape
-        *bsT2,n,d = global_pos_vel.shape
-        angles_omega = torch.zeros(*bsT2,n,device=global_pos_vel.device,dtype=global_pos_vel.dtype)
-        start_position_velocity = torch.zeros(*bsT2,d)
-        start_position_velocity[...,0,:] = self.body_graph.nodes[0]['tether'][None]
-        rel_pos_vel  = global_pos_vel[...,0,:] - start_position_velocity
-        angles_omega[...,0] += self.cartesian2angle(rel_pos_vel)
-        start_position_velocity += rel_pos_vel
-        for (_,j), length in nx.get_edge_attributes(self.body_graph,'l').items():
-            rel_pos_vel  = global_pos_vel[...,j,:] - start_position_velocity
-            angles_omega[...,j] += self.cartesian2angle(rel_pos_vel)
-            start_position_velocity += rel_pos_vel
-        return angles_omega.unsqueeze(-1)
-        
-    def sample_initial_conditions(self,N):
-        n = len(self.body_graph.nodes)
-        angles_and_angvel = torch.randn(N, 2, n)  # (N,2,n)
-        return self.body2globalCoords(angles_and_angvel)
-
-    def potential(self, x):
-        """ Gravity potential """
-        return (self.M @ x)[..., 1].sum(1)
-
-    def __str__(self):
-        return f"{self.__class__}{len(self.body_graph.nodes)}"
-    def __repr__(self):
-        return str(self)
+            xt = zt[:,0,:,:]
+        anim = self.animator(xt,self)
+        return anim.animate()
+    @property
+    def animator(self):
+        return Animation
 
 def jvp(y, x, v):
     with torch.enable_grad():
@@ -349,68 +284,3 @@ def MLE2(x0, F, ts, **kwargs):
         Lxt = odeint(LD, Lx0, ts, **kwargs)
         maximal_exponent = Lxt  # [...,-1]
     return maximal_exponent
-
-
-# Make animation plots look nicer. Why are there leftover points on the trails?
-class Animation2d(object):
-    def __init__(self, qt, body, ms=None, box_lim=(-2, 2, -3, 2)):
-        if ms is None:
-            ms = len(qt) * [6]
-        self.qt = qt
-        self.G = body.body_graph
-        self.fig = plt.figure()
-        self.ax = self.fig.add_axes([0, 0, 1, 1])  # axes(projection='3d')
-        self.ax.set_xlim(box_lim[:2])
-        self.ax.set_ylim(box_lim[2:])
-        self.ax.set_aspect("equal")
-        self.traj_lines = sum([self.ax.plot([], [], "-") for particle in self.qt], [])
-        tethers = nx.get_node_attributes(self.G, "tether")
-        self.beam_lines = sum(
-            [
-                self.ax.plot([], [], "-")
-                for _ in range(len(tethers) + len(self.G.edges))
-            ],
-            [],
-        )
-        self.pts = sum(
-            [self.ax.plot([], [], "o", ms=ms[i]) for i in range(len(self.qt))], []
-        )
-
-    def init(self):
-        for line, pt in zip(self.traj_lines, self.pts):
-            line.set_data([], [])
-            pt.set_data([], [])
-        for line in self.beam_lines:
-            line.set_data([], [])
-        return self.traj_lines + self.pts + self.beam_lines
-
-    def update(self, i=0):
-        for node_values, line, pt, trajectory in zip(
-            self.G.nodes.values(), self.traj_lines, self.pts, self.qt
-        ):
-            x, y = trajectory[:, i - 50 if i > 50 else 0 : i + 1]
-            line.set_data(x, y)
-            if "m" in node_values:
-                pt.set_data(x[-1:], y[-1:])
-        beams = [
-            torch.stack([self.qt[k, :, i], self.qt[l, :, i]], dim=1)
-            for (k, l) in self.G.edges
-        ] + [
-            torch.stack([loc, self.qt[k, :, i]], dim=1)
-            for k, loc in nx.get_node_attributes(self.G, "tether").items()
-        ]
-        for beam, line in zip(beams, self.beam_lines):
-            line.set_data(*beam)
-        # self.fig.clear()
-        self.fig.canvas.draw()
-        return self.traj_lines + self.pts + self.beam_lines
-
-    def animate(self):
-        return animation.FuncAnimation(
-            self.fig,
-            self.update,
-            frames=self.qt.shape[-1],
-            interval=33,
-            init_func=self.init,
-            blit=True,
-        )

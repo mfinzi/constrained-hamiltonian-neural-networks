@@ -6,12 +6,12 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from oil.utils.utils import LoaderTo, islice, FixedNumpySeed, cosLr
-from biases.hamiltonian import ChainPendulum
+from biases.chainPendulum import ChainPendulum
 import biases.hamiltonian as hamiltonian
 import biases.datasets as datasets
 import biases.dynamicsTrainer as dynamicsTrainer
 from biases.datasets import RigidBodyDataset
-from biases.dynamicsTrainer import FC, CHFC, CHLC, IntegratedDynamicsTrainer
+from biases.dynamicsTrainer import NN, CHNN, CHLC, IntegratedDynamicsTrainer
 import lie_conv.lieGroups as lieGroups
 import pickle
 # from lie_conv.dynamics_trial import DynamicsTrial
@@ -26,8 +26,8 @@ except ImportError:
         ImportWarning,
     )
 
-# network = HNN, LNN, FC, CHFC
-def makeTrainer(*,network=CHFC,net_cfg={},lr=3e-3,n_train=800,regen=False,
+# network = HNN, LNN, NN, CHNN
+def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
         dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,dt=0.1,
         dtype=torch.float32,angular=False,device=torch.device("cuda"),
          bs=200,num_epochs=100,trainer_config={}):

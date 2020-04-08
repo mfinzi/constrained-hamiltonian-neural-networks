@@ -10,7 +10,8 @@ import os
 import networkx as nx
 from torch.utils.data import Dataset
 from oil.utils.utils import Named, export, Expression, FixedNumpySeed
-from biases.hamiltonian import ChainPendulum, RigidBody
+from biases.hamiltonian import RigidBody
+from biases.chainPendulum import ChainPendulum
 from biases.utils import rel_err
 
 
