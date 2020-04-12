@@ -4,12 +4,16 @@ from torchdiffeq import odeint
 from torch.autograd import grad
 from typing import Callable
 from torch import Tensor
+from lie_conv.utils import export
 
 
+@export
 class LagrangianDynamics(nn.Module):
     """ Defines the dynamics given a Lagrangian.
 
-    If wgrad=True, the dynamics can be backproped.
+    Args:
+        L: A callable function that takes in q and qdot and returns the L(q, qdot)
+        wgrad: If True, the dynamics can be backproped.
     """
 
     def __init__(self, L: Callable[[Tensor, Tensor], Tensor], wgrad: bool = False):
@@ -19,6 +23,11 @@ class LagrangianDynamics(nn.Module):
         self.nfe = 0
 
     def forward(self, t: Tensor, z: Tensor) -> Tensor:
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
+        """
         two_d = z.shape[-1]
         d = two_d // 2
         with torch.enable_grad():

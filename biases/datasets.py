@@ -1,15 +1,9 @@
-import math
 import torch
-import torchvision.transforms as transforms
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-import warnings
-import h5py
 import os
 import networkx as nx
 from torch.utils.data import Dataset
-from oil.utils.utils import Named, export, Expression, FixedNumpySeed
+from oil.utils.utils import Named, export
 from biases.hamiltonian import RigidBody
 from biases.chainPendulum import ChainPendulum
 from biases.utils import rel_err
@@ -20,8 +14,17 @@ class RigidBodyDataset(Dataset, metaclass=Named):
     space_dim = 2
     num_targets = 1
 
-    def __init__(self,root_dir=None,body=ChainPendulum(3),n_systems=100,regen=False,
-                chunk_len=5,dt=0.1,integration_time=50,angular_coords=False):
+    def __init__(
+        self,
+        root_dir=None,
+        body=ChainPendulum(3),
+        n_systems=100,
+        regen=False,
+        chunk_len=5,
+        dt=0.1,
+        integration_time=50,
+        angular_coords=False,
+    ):
         super().__init__()
         root_dir = root_dir or os.path.expanduser(
             f"~/datasets/ODEDynamics/{self.__class__}/"
@@ -39,12 +42,11 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         self.Ts, self.Zs = self.chunk_training_data(ts, zs, chunk_len)
 
         if angular_coords:
-            N,T = self.Zs.shape[:2]
-            flat_Zs = self.Zs.reshape(N*T,*self.Zs.shape[2:])
+            N, T = self.Zs.shape[:2]
+            flat_Zs = self.Zs.reshape(N * T, *self.Zs.shape[2:])
             self.Zs = self.body.global2bodyCoords(flat_Zs.double())
-            print(rel_err(self.body.body2globalCoords(self.Zs.squeeze(-1)),flat_Zs))
-            self.Zs = self.Zs.reshape(N,T,*self.Zs.shape[1:]).float()
-
+            print(rel_err(self.body.body2globalCoords(self.Zs.squeeze(-1)), flat_Zs))
+            self.Zs = self.Zs.reshape(N, T, *self.Zs.shape[1:]).float()
 
     def __len__(self):
         return self.Zs.shape[0]
@@ -95,13 +97,21 @@ class CartPole(RigidBody):
         # Masses (and length) can be ignored for now since we are
         # only using the connectivity of the graph to
         # calculate DPhi, the constraint matrix
-        self.body_graph.add_node(0,m=1,pos_cnstr=1) #(axis)
-        self.body_graph.add_node(1,m=1)
-        self.body_graph.add_edge(0,1,l=1)
+        self.body_graph.add_node(0, m=1, pos_cnstr=1)  # (axis)
+        self.body_graph.add_node(1, m=1)
+        self.body_graph.add_edge(0, 1, l=1)
+
 
 class CartpoleDataset(Dataset):
-    def __init__(self,root_dir=None,regen=False,batch_size=100,
-                    chunk_len=5,time_limit=10,seed=0):
+    def __init__(
+        self,
+        root_dir=None,
+        regen=False,
+        batch_size=100,
+        chunk_len=5,
+        time_limit=10,
+        seed=0,
+    ):
         super().__init__()
         self.body = CartPole()
         self.seed = seed
@@ -150,7 +160,7 @@ class CartpoleDataset(Dataset):
 
             # we'll use the default for Cartpole for now
             nv = physics.model.nv
-            #if self._swing_up:
+            # if self._swing_up:
             #    physics.named.data.qpos["slider"] = 0.01 * self.random.randn()
             #     physics.named.data.qpos["hinge_1"] = np.pi + 0.01 * self.random.randn()
             #     physics.named.data.qpos[2:] = 0.1 * self.random.randn(nv - 2)
@@ -197,17 +207,17 @@ class CartpoleDataset(Dataset):
         time = time.view(1, -1).expand(batch_size, len(time))
 
         # ignore generalized_trajs for now
-        return time[:,::50], cartesian_trajs[:,::50]
+        return time[:, ::50], cartesian_trajs[:, ::50]
 
     def _get_com(self, env, body):
         # we only keep x and z
-        #from IPython.core.debugger import set_trace; set_trace()
-        return np.copy(env.physics.named.data.xipos[body][[0,2]])
+        # from IPython.core.debugger import set_trace; set_trace()
+        return np.copy(env.physics.named.data.xipos[body][[0, 2]])
 
     def _get_cvel(self, env, body):
         # last three entries corresponding to translational velocity
         # we only keep x and z
-        return np.copy(env.physics.named.data.cvel[body][[-3,-1]])
+        return np.copy(env.physics.named.data.cvel[body][[-3, -1]])
 
     def _get_com_mom(self, env, body):
         return self._get_cvel(env, body) * env.physics.named.model.body_mass[body]
@@ -247,7 +257,7 @@ class CartpoleDataset(Dataset):
             cart_com_mom.append(self._get_com_mom(env, "cart"))
             pole_p.append(self._get_p(env, "hinge_1"))
             cart_p.append(self._get_p(env, "slider"))
-        
+
         pole_com, pole_com_mom, cart_com, cart_com_mom = map(
             np.stack, [pole_com, pole_com_mom, cart_com, cart_com_mom]
         )
