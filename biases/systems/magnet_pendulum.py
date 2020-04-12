@@ -1,8 +1,8 @@
 import torch
 import networkx as nx
 from oil.utils.utils import export
-from biases.hamiltonian import RigidBody
-from biases.chainPendulum import PendulumAnimation
+from biases.systems.rigid_body import RigidBody
+from biases.systems.chain_pendulum import PendulumAnimation
 import numpy as np
 
 

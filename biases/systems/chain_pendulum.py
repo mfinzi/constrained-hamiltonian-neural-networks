@@ -2,7 +2,7 @@ import torch
 import networkx as nx
 import numpy as np
 from oil.utils.utils import export
-from biases.systems import RigidBody
+from biases.systems.rigid_body import RigidBody
 from biases.animation import Animation
 
 
