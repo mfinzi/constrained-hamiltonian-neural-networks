@@ -59,11 +59,12 @@ class LNN(nn.Module, metaclass=Named):
         Returns: Size N Lagrangian Tensor
         """
         assert (t.ndim == 0) and (z.ndim == 2)
-        d = z.shape[-1] // 2
+        # TODO: factor out the theta mod preprocessing
+        half_D = z.shape[-1] // 2
         theta_mod = (z[..., self.angular_dims] + np.pi) % (2 * np.pi) - np.pi
-        not_angular_dims = list(set(range(d)) - set(self.angular_dims))
+        not_angular_dims = list(set(range(half_D)) - set(self.angular_dims))
         not_angular_q = z[..., not_angular_dims]
-        qdot = z[..., d:]
+        qdot = z[..., half_D:]
         z_mod = torch.cat([theta_mod, not_angular_q, qdot], dim=-1)
         # TODO: why + 1e-1?
         return self.net(z_mod) + 1e-1 * (qdot * qdot).sum(-1)

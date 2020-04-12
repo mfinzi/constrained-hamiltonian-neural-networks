@@ -84,21 +84,24 @@ class HNN(nn.Module, metaclass=Named):
         """
         if self.canonical:
             raise NotImplementedError
-        D = z.shape[-1] // 2  # of ODE dims, 2*num_particles*space_dim
+        # TODO: factor out the theta mod preprocessing
+        assert (t.ndim == 0) and (z.ndim == 2)
+        half_D = (
+            z.shape[-1] // 2
+        )  # half the number of ODE dims, i.e.  num_particles*space_dim
         N = z.shape[0]
-        q = z[:, :D]
+        q = z[:, :half_D]
         theta_mod = (q[..., self.angular_dims] + np.pi) % (2 * np.pi) - np.pi
-        not_angular_dims = list(set(range(D)) - set(self.angular_dims))
+        not_angular_dims = list(set(range(half_D)) - set(self.angular_dims))
         not_angular_q = q[..., not_angular_dims]
-        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1).reshape(N, -1)
+        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1)
         V = self.potential_net(q_mod)
-        p = z[:, D:].reshape(N, self.n_dof, -1)
+        p = z[:, half_D:].reshape(N, self.n_dof, -1)
         Minv = self.Minv(q)
         T = EuclideanT(p, Minv)
         return T + V
 
     def forward(self, t, z):
-        """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
         """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
         Args:
             t: Scalar Tensor of the current time
