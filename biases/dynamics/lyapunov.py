@@ -2,14 +2,22 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint  # odeint_adjoint as odeint
 import numpy as np
+from lie_conv.utils import export
 
 
+@export
 class LyapunovDynamics(nn.Module):
     def __init__(self, F):
         super().__init__()
         self.F = F
 
     def forward(self, t, xqr):
+        """ Computes a batch of `NxD` time derivatives of the state `xqr` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
+        """
+        assert (t.ndim == 0) and (xqr.ndim == 2)
         n = (xqr.shape[-1] - 1) // 2
         with torch.enable_grad():
             x = xqr[..., :n] + torch.zeros_like(xqr[..., :n], requires_grad=True)
