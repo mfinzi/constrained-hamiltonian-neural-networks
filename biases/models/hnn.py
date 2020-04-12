@@ -14,7 +14,7 @@ class HNN(nn.Module, metaclass=Named):
     def __init__(
         self,
         G,
-        k: int = 150,
+        hidden_size: int = 150,
         num_layers: int = 3,
         canonical: bool = False,
         angular_dims: Union[Tuple, bool] = tuple(),
@@ -25,7 +25,7 @@ class HNN(nn.Module, metaclass=Named):
         self.nfe = 0
         self.n_dof = n_dof = len(G.nodes)
         self.canonical = canonical
-        chs = [n_dof] + num_layers * [k]
+        chs = [n_dof] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
             *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
