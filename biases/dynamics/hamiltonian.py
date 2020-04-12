@@ -1,17 +1,32 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
+from typing import Callable
+from lie_conv.utils import export
 
 
+@export
 class HamiltonianDynamics(nn.Module):
-    """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
+    """ Defines the dynamics given a Hamiltonian.
 
-    def __init__(self, H, wgrad=False):
+    Args:
+        H: A callable function that takes in q and p concatenated together and returns H(q, p)
+        wgrad: If True, the dynamics can be backproped.
+    """
+
+    def __init__(self, H: Callable[[Tensor, Tensor], Tensor], wgrad: bool = False):
         super().__init__()
         self.H = H
         self.wgrad = wgrad
         self.nfe = 0
 
-    def forward(self, t, z):
+    def forward(self, t: Tensor, z: Tensor) -> Tensor:
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
+        """
+        assert (t.ndim == 0) and (z.ndim == 2)
         self.nfe += 1
         with torch.enable_grad():
             z = torch.zeros_like(z, requires_grad=True) + z
@@ -20,8 +35,16 @@ class HamiltonianDynamics(nn.Module):
         return J(dH.unsqueeze(-1)).squeeze(-1)
 
 
+@export
 class ConstrainedHamiltonianDynamics(nn.Module):
-    """ Defines the dynamics given a hamiltonian. If wgrad=True, the dynamics can be backproped."""
+    """ Defines the Constrained Hamiltonian dynamics given a Hamiltonian and
+    gradients of constraints.
+
+    Args:
+        H: A callable function that takes in q and p and returns H(q, p)
+        DPhi: Matrix containing gradients of constraints
+        wgrad: If True, the dynamics can be backproped.
+    """
 
     def __init__(self, H, DPhi, wgrad=False):
         super().__init__()
@@ -31,6 +54,12 @@ class ConstrainedHamiltonianDynamics(nn.Module):
         self.nfe = 0
 
     def forward(self, t, z):
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
+        """
+        assert (t.ndim == 0) and (z.ndim == 2)
         self.nfe += 1
         with torch.enable_grad():
             z = torch.zeros_like(z, requires_grad=True) + z

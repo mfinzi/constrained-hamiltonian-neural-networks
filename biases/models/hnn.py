@@ -1,95 +1,144 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from lie_conv.utils import export, Named
 from biases.models.utils import FCsoftplus, Reshape, tril_mask
 from biases.dynamics.hamiltonian import HamiltonianDynamics, EuclideanT
 import numpy as np
+from typing import Tuple, Union
 
 
 @export
 class HNN(nn.Module, metaclass=Named):
     def __init__(
-        self, G, k=150, num_layers=3, canonical=False, angular_dims=[], **kwargs
+        self,
+        G,
+        k: int = 150,
+        num_layers: int = 3,
+        canonical: bool = False,
+        angular_dims: Union[Tuple, bool] = tuple(),
+        wgrad: bool = True,
+        **kwargs
     ):
         super().__init__(**kwargs)
         self.nfe = 0
-        self.n = n = len(G.nodes)
-        self.canonical = False
-        chs = [n] + num_layers * [k]
+        self.n_dof = n_dof = len(G.nodes)
+        self.canonical = canonical
+        chs = [n_dof] + num_layers * [k]
         self.potential_net = nn.Sequential(
             *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
             Reshape(-1)
         )
+        print("HNN currently assumes time independent Hamiltonian")
         self.mass_net = nn.Sequential(
             *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], n * n),
-            Reshape(-1, n, n)
+            nn.Linear(chs[-1], n_dof * n_dof),
+            Reshape(-1, n_dof, n_dof)  # Here we assume each dof is 1 dimensional
         )
-        self.angular_dims = list(range(n)) if angular_dims == True else angular_dims
+        self.angular_dims = list(range(n_dof)) if angular_dims is True else angular_dims
+        self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 
-    def Minv(self, q):
-        """ inputs: [q (bs,n,d)]. Outputs: [M^{-1}: (bs,n,k) -> (bs,n,k)]"""
-        eps = 1e-4
-        q = q.squeeze(-1)
-        D = q.shape[-1]
+    def Minv(self, q: Tensor, eps: int = 1e-4) -> Tensor:
+        """Compute the learned inverse mass matrix M^{-1}
+
+        Args:
+            q: N x n_dof x D Tensor representing the position
+            eps: diagonal noise to add to M^{-1}
+        """
+        assert q.ndim == 3
+        N = q.size(0)
+        q = q.reshape(N, -1)
+        d = q.shape[-1]  # n_dof x D
+
         theta_mod = (q[..., self.angular_dims] + np.pi) % (2 * np.pi) - np.pi
-        not_angular_dims = list(set(range(D)) - set(self.angular_dims))
+        not_angular_dims = list(set(range(d)) - set(self.angular_dims))
         not_angular_q = q[..., not_angular_dims]
-        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1).reshape(-1, self.n)
-        mass_L = self.mass_net(q_mod).reshape(-1, self.n, self.n)
+        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1).reshape(N, -1)
+
+        mass_L = self.mass_net(q_mod)
         lower_diag = tril_mask(mass_L) * mass_L
-        mask = torch.eye(self.n, device=q.device, dtype=q.dtype)[None]
+        mask = torch.eye(mass_L.size(-1), device=q.device, dtype=q.dtype)
         Minv = lower_diag @ lower_diag.transpose(-2, -1) + eps * mask
         return Minv
 
     def M(self, q):
-        """ inputs: [q (bs,n,d)]. Outputs: [M: (bs,n,k) -> (bs,n,k)]"""
-        # eps = 1e-4
-        # mass_L = self.mass_net(q.squeeze(-1)).reshape(-1,self.n,self.n)
-        # lower_diag = tril_mask(mass_L)*mass_L
-        # mask = torch.eye(self.n,device=q.device,dtype=q.dtype)[None]
+        """Returns a function that multiplies the mass matrix M by a vector v
+
+        Args:
+            q: N x n_dof x D Tensor representing the position
+            eps: diagonal noise to add to M^{-1}
+        """
         return lambda v: torch.solve(v, self.Minv(q))[0]
 
     def H(self, t, z):
-        """ computes the hamiltonian, inputs (bs,2nd), (bs,n,c)"""
-        """ inputs: [t (T,)], [z (bs,2nd)]. Outputs: [H (bs,)]"""
+        """ Compute the Hamiltonian H(t, q, v or p)
+        Args:
+            t: Scalar Tensor representing time
+            z: N x D Tensor of the N different states in D dimensions.
+                Assumes that z is [q, v or p].
+                If self.canonical is True then we assume p instead of v
+
+        Returns: Size N Hamiltonian Tensor
+        """
+        if self.canonical:
+            raise NotImplementedError
         D = z.shape[-1] // 2  # of ODE dims, 2*num_particles*space_dim
-        bs = z.shape[0]
+        N = z.shape[0]
         q = z[:, :D]
         theta_mod = (q[..., self.angular_dims] + np.pi) % (2 * np.pi) - np.pi
         not_angular_dims = list(set(range(D)) - set(self.angular_dims))
         not_angular_q = q[..., not_angular_dims]
-        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1).reshape(bs, self.n, -1)
-        V = self.compute_V(q_mod)
-        p = z[:, D:].reshape(bs, self.n, -1)
+        q_mod = torch.cat([theta_mod, not_angular_q], dim=-1).reshape(N, -1)
+        V = self.potential_net(q_mod)
+        p = z[:, D:].reshape(N, self.n_dof, -1)
         Minv = self.Minv(q)
         T = EuclideanT(p, Minv)
         return T + V
 
-    def forward(self, t, z, wgrad=True):
+    def forward(self, t, z):
         """ inputs: [t (T,)], [z (bs,2n)]. Outputs: [F (bs,2n)]"""
-        self.nfe += 1
-        dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
-        return dynamics(t, z)
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
 
-    def compute_V(self, q):
-        """ inputs: [q (bs,n,d)] outputs: [V (bs,)]"""
-        return self.potential_net(q.squeeze(-1)).squeeze(-1)
+        Returns: N x D Tensor of the time derivatives
+        """
+        assert (t.ndim == 0) and (z.ndim == 2)
+        self.nfe += 1
+        return self.dynamics(t, z)
 
     def integrate(self, z0, ts, tol=1e-4):
-        """  """
-        """ inputs: [z0 (bs,2,n,d)], [ts (T,)]. Outputs: [xvs (bs,T,2,n,d)]"""
-        bs = z0.shape[0]
-        p = self.M(z0[:, 0])(z0[:, 1])
-        p = z0[:, 1] if self.canonical else self.M(z0[:, 0])(z0[:, 1])
-        xp = torch.stack([z0[:, 0], p], dim=1).reshape(bs, -1)
-        xpt = odeint(self, xp, ts, rtol=tol, method="rk4")
-        xps = xpt.permute(1, 0, 2).reshape(bs * len(ts), *z0.shape[1:])
-        vs = self.Minv(xps[:, 0]) @ xps[:, 1]
-        xpt = odeint(self, xp, ts, rtol=tol, method="rk4").permute(1, 0, 2)
-        xps = xpt.reshape(bs * len(ts), *z0.shape[1:])
-        vs = xps[:, 1] if self.canonical else (self.Minv(xps[:, 0]) @ xps[:, 1])
-        xvs = torch.stack([xps[:, 0], vs], dim=1).reshape(bs, len(ts), *z0.shape[1:])
-        return xvs
+        """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
+
+        Args:
+            z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
+                Tensor representing initial state. N is the batch size
+            ts: a length T Tensor representing the time points to evaluate at
+            tol: integrator tolerance
+
+        Returns: a N x T x 2 x n_dof x d sized Tensor
+        """
+        assert (z0.ndim == 4) and (ts.ndim == 1)
+        N = z0.shape[0]
+        if self.canonical:
+            q0, p0 = z0.chunk(2, dim=1)
+        else:
+            q0, v0 = z0.chunk(2, dim=1)
+            p0 = self.M(q0)(v0)
+
+        qp0 = torch.stack([q0, p0], dim=1).reshape(N, -1)
+        qpt = odeint(self, qp0, ts, rtol=tol, method="rk4")
+        qpt = qpt.permute(1, 0, 2)  # T x N x D -> N x T x D
+
+        if self.canonical:
+            qpt = qpt.reshape(N, len(ts), *z0.shape[1:])
+            return qpt
+        else:
+            qt, pt = qpt.chunk(2, dim=-1)
+            vt = self.Minv(qt) @ pt
+            qvt = torch.cat([qt, vt], dim=-1)
+            qvt = qvt.reshape(N, len(ts), *z0.shape[1:])
+            return qvt

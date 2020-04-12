@@ -25,6 +25,5 @@ class Reshape(nn.Module):
 
 def tril_mask(square_mat):
     n = square_mat.size(-1)
-    coords = square_mat.new(n)
-    torch.arange(n, out=coords)
+    coords = torch.arange(n)
     return coords <= coords.view(n, 1)
