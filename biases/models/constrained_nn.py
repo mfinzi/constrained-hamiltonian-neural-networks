@@ -33,6 +33,10 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         self.wgrad = wgrad
         self.n_dof = len(G.nodes)
         self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+        self.dynamics = ConstrainedHamiltonianDynamics(
+            self.H, self.DPhi, wgrad=self.wgrad
+        )
         self._Minv_net = torch.nn.Parameter(torch.eye(self.n_dof))
         self.register_buffer("_tril_mask", tril_mask(self._Minv_net))
         print("CH currently assumes potential energy depends only on q")
@@ -91,8 +95,7 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
 
     def forward(self, t, z):
         self.nfe += 1
-        dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=self.wgrad)
-        return dynamics(t, z)
+        return self.dynamics(t, z)
 
     def compute_V(self, x):
         raise NotImplementedError
@@ -114,9 +117,9 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         assert z0.size(-1) == self.dof_ndim
         assert z0.size(-2) == self.n_dof
         N = z0.size(0)
-        z0 = z0.reshape(N, -1)  # -> N x (2 * n_dof * dof_ndim)
+        z0 = z0.reshape(N, -1)  # -> N x (2 * n_dof * dof_ndim) =: N x D
         x0, xdot0 = z0.chunk(2, dim=-1)
-        p0 = self.M(x0)
+        p0 = self.M(xdot0)
 
         xp0 = torch.cat([x0, p0], dim=-1)
         xpt = odeint(self, xp0, ts, rtol=tol, method="rk4")
@@ -125,7 +128,7 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         xpt = xpt.reshape(N, len(ts), 2, self.n_dof, self.dof_ndim)
         xt, pt = xpt.chunk(2, dim=-3)
         # TODO: make Minv @ pt faster by L(L^T @ pt)
-        vt = self.Minv.matmul(pt)
+        vt = self.Minv.matmul(pt)  # Minv [n_dof x n_dof]. pt [N, T, 1, n_dof, dof_ndim]
         xvt = torch.cat([xt, vt], dim=-3)
 
         return xvt
