@@ -55,27 +55,24 @@ class HNN(nn.Module, metaclass=Named):
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 
     def H(self, t, z):
-        """ Compute the Hamiltonian H(t, q, v or p)
+        """ Compute the Hamiltonian H(t, q, p)
         Args:
             t: Scalar Tensor representing time
             z: N x D Tensor of the N different states in D dimensions.
-                Assumes that z is [q, v or p].
-                If self.canonical is True then we assume p instead of v
+                Assumes that z is [q, p].
 
         Returns: Size N Hamiltonian Tensor
         """
-        if self.canonical:
-            raise NotImplementedError
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
-
-        q, qdot = z.chunk(2, dim=-1)
+        q, p = z.chunk(2, dim=-1)
         q_mod = mod_angles(q, self.angular_dims)
 
         V = self.potential_net(q_mod)
 
         Minv = self.Minv(q_mod)
-        T = GeneralizedT(qdot, Minv)
+        # TODO: should this be p?
+        T = GeneralizedT(p, Minv)
         return T + V
 
     def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
