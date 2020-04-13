@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, mod_angles
+from biases.models.utils import FCswish, Reshape, mod_angles
 from biases.dynamics.lagrangian import LagrangianDynamics
 from typing import Tuple, Union, Optional
 
@@ -28,7 +28,7 @@ class LNN(nn.Module, metaclass=Named):
         self.q_ndim = q_ndim
         chs = [2 * q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
-            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
+            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
             nn.Linear(chs[-1], 1),
             Reshape(-1)
         )
@@ -48,10 +48,11 @@ class LNN(nn.Module, metaclass=Named):
         Returns: N x D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
+        ret = self.dynamics(t, z)
         self.nfe += 1
-        return self.dynamics(t, z)
+        return ret
 
-    def L(self, t: Tensor, z: Tensor):
+    def L(self, t: Tensor, z: Tensor, eps=1e-1):
         """ Compute the Lagrangian L(t, q, qdot)
         Args:
             t: Scalar Tensor representing time
@@ -65,8 +66,10 @@ class LNN(nn.Module, metaclass=Named):
         q, qdot = z.chunk(2, dim=-1)
         q_mod = mod_angles(q, self.angular_dims)
         z_mod = torch.cat([q_mod, qdot], dim=-1)
-        # reg = 1e-1 * (qdot * qdot).sum(-1)
-        reg = 0
+        # Add regularization to prevent singular mass matrix at initialization
+        # equivalent to adding eps to the diagonal of the mass Hessian
+        # Note that the network could learn to offset this added term
+        reg = eps * (qdot * qdot).sum(-1)
         return self.net(z_mod) + reg
 
     def integrate(self, z0: Tensor, ts: Tensor, tol=1e-4) -> Tensor:
