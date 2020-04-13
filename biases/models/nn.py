@@ -16,11 +16,14 @@ class NN(nn.Module, metaclass=Named):
         hidden_size: int = 200,
         num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
+        wgrad: bool = True,
         **kwargs
     ):
         super().__init__(**kwargs)
         if dof_ndim is not None:
             print("NN ignores dof_ndim")
+        if wgrad:
+            print("NN ignores wgrad")
         q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
         self.q_ndim = q_ndim
         chs = [2 * q_ndim] + num_layers * [hidden_size]
