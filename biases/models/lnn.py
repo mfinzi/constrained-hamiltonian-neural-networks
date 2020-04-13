@@ -25,11 +25,13 @@ class LNN(nn.Module, metaclass=Named):
         # Number of function evaluations
         self.nfe = 0
         # Number of degrees of freedom
-        if dof_ndim is not None:
-            print("LNN ignores dof_ndim")
-        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
+
         self.q_ndim = q_ndim
-        chs = [2 * q_ndim] + num_layers * [hidden_size]
+        self.n_dof = len(G.nodes)
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+
+        chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)

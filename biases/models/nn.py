@@ -20,12 +20,13 @@ class NN(nn.Module, metaclass=Named):
         **kwargs
     ):
         super().__init__(**kwargs)
-        if dof_ndim is not None:
-            print("NN ignores dof_ndim")
         if wgrad:
             print("NN ignores wgrad")
-        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
         self.q_ndim = q_ndim
+        self.n_dof = len(G.nodes)
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+
         chs = [2 * q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
             *[

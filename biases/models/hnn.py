@@ -24,11 +24,12 @@ class HNN(nn.Module, metaclass=Named):
     ):
         super().__init__(**kwargs)
         self.nfe = 0
-        if dof_ndim is not None:
-            print("HNN ignores dof_ndim")
-        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
-        self.q_ndim = q_ndim
         self.canonical = canonical
+
+        self.q_ndim = q_ndim
+        self.n_dof = len(G.nodes)
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
 
         chs = [q_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
