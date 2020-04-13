@@ -23,7 +23,6 @@ class HNN(nn.Module, metaclass=Named):
     ):
         super().__init__(**kwargs)
         self.nfe = 0
-        # Number of degrees of freedom
         q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
         self.q_ndim = q_ndim
         self.canonical = canonical

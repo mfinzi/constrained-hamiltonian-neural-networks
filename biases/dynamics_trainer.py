@@ -8,7 +8,7 @@ import numpy as np
 
 @export
 class IntegratedDynamicsTrainer(Trainer):
-    """ Model should specify the dynamics, mapping from t,z,sysP -> dz/dt"""
+    """ Model should specify the dynamics, mapping from t,z -> dz/dt"""
 
     def __init__(self, *args, tol=1e-4, **kwargs):
         super().__init__(*args, **kwargs)

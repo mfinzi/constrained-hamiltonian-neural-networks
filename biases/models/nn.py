@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCswish
-import numpy as np
-from typing import Tuple, Union
+from biases.models.utils import FCsoftplus, mod_angles, Linear
+from typing import Tuple, Union, Optional
 
 
 @export
@@ -12,22 +11,27 @@ class NN(nn.Module, metaclass=Named):
     def __init__(
         self,
         G,
-        dof_ndim: int = 1,
-        hidden_size: int = 300,
-        num_layers: int = 4,
+        q_ndim: Optional[int] = None,
+        hidden_size: int = 200,
+        num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.n_dif = n_dof = len(G.nodes())
-        chs = [n_dof * 2 * dof_ndim] + num_layers * [hidden_size]
+        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
+        self.q_ndim = q_ndim
+        chs = [2 * q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
-            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], 2 * dof_ndim * n_dof)
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(chs[-1], 2 * q_ndim, zero_bias=True, orthogonal_init=True)
         )
+        print("NN currently assumes time independent ODE")
         self.nfe = 0
         self.angular_dims = (
-            list(range(n_dof * dof_ndim)) if angular_dims is True else angular_dims
+            list(range(q_ndim)) if angular_dims is True else angular_dims
         )
 
     def forward(self, t, z):
@@ -39,11 +43,10 @@ class NN(nn.Module, metaclass=Named):
         Returns: N x D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
-        half_D = z.shape[-1] // 2
-        theta_mod = (z[..., self.angular_dims] + np.pi) % (2 * np.pi) - np.pi
-        not_angular_dims = list(set(range(half_D)) - set(self.angular_dims))
-        not_angular_q = z[..., not_angular_dims]
-        z_mod = torch.cat([theta_mod, not_angular_q, z[..., half_D:]], dim=-1)
+        assert z.size(-1) == 2 * self.q_ndim
+        q, qdot = z.chunk(2, dim=-1)
+        q_mod = mod_angles(q, self.angular_dims)
+        z_mod = torch.cat([q_mod, qdot], dim=-1)
         return self.net(z_mod)
 
     def integrate(self, z0, ts, tol=1e-4):
@@ -66,9 +69,9 @@ class NN(nn.Module, metaclass=Named):
 
 @export
 class DeltaNN(NN):
-    def integrate(self, z0, ts):
+    def integrate(self, z0, ts, tol=0.0):
         """ Integrates an initial state forward in time according to the learned
-        dynamics using linear approximations
+        dynamics using Euler's method with predicted time derivatives
 
         Args:
             z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
