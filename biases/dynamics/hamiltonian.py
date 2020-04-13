@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Callable
-from lie_conv.utils import export
+from typing import Callable, Union
+from oil.utils.utils import export
 
 
 @export
@@ -14,7 +14,7 @@ class HamiltonianDynamics(nn.Module):
         wgrad: If True, the dynamics can be backproped.
     """
 
-    def __init__(self, H: Callable[[Tensor, Tensor], Tensor], wgrad: bool = False):
+    def __init__(self, H: Callable[[Tensor, Tensor], Tensor], wgrad: bool = True):
         super().__init__()
         self.H = H
         self.wgrad = wgrad
@@ -42,18 +42,23 @@ class ConstrainedHamiltonianDynamics(nn.Module):
 
     Args:
         H: A callable function that takes in q and p and returns H(q, p)
-        DPhi: Matrix containing gradients of constraints
+        DPhi:
         wgrad: If True, the dynamics can be backproped.
     """
 
-    def __init__(self, H, DPhi, wgrad=False):
+    def __init__(
+        self,
+        H: Callable[[Tensor, Tensor], Tensor],
+        DPhi: Callable[[Tensor], Tensor],
+        wgrad: bool = True,
+    ):
         super().__init__()
         self.H = H
         self.DPhi = DPhi
         self.wgrad = wgrad
         self.nfe = 0
 
-    def forward(self, t, z):
+    def forward(self, t: Tensor, z: Tensor) -> Tensor:
         """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
         Args:
             t: Scalar Tensor of the current time
@@ -87,10 +92,36 @@ def Proj(DPhi):
     return _P
 
 
-def EuclideanT(p, Minv, function=False):
-    """ Shape (bs,n,d), and (bs,n,n),
-        standard \sum_n pT Minv p/2 kinetic energy"""
-    if function:
-        return (p * Minv(p)).sum(-1).sum(-1) / 2
-    else:
-        return (p * (Minv @ p)).sum(-1).sum(-1) / 2
+def EuclideanT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
+    """p^T Minv p/2 kinetic energy in Euclidean space.
+
+    Note that in Euclidean space, Minv only mixes degrees of freedom, not their individual dimensions
+
+    Args:
+        p: N x ndof x D Tensor representing the canonical momentum
+        Minv: N x ndof x ndof Tensor representing the inverse mass matrix. Can be a
+            callable that computes Minv(p) as well
+    """
+
+    assert p.ndim == 3
+    Minv_p = Minv(p) if callable(Minv) else Minv.matmul(p)
+    assert Minv_p.ndim == 3
+    T = (p * Minv_p).sum((-1, -2)) / 2.0
+    return T
+
+
+def GeneralizedT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
+    """p^T Minv p/2 kinetic energy in generalized coordinates
+
+    Note that in non-Euclidean space, Minv mixes every coordinate
+
+    Args:
+        p: N x D Tensor representing the canonical momentum.
+        Minv: N x D x D Tensor representing the inverse mass matrix. Can be a
+            callable that computes Minv(p) as well
+    """
+    assert p.ndim == 2
+    Minv_p = Minv(p) if callable(Minv) else Minv.matmul(p.unsqueeze(-1)).squeeze(-1)
+    assert Minv_p.ndim == 2
+    T = (p * Minv_p).sum((-1,)) / 2.0
+    return T
