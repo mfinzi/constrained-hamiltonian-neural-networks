@@ -61,10 +61,11 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         """
         assert qdot.ndim == 2
         assert qdot.size(-1) == self.n_dof * self.dof_ndim
-        x = qdot.reshape(-1, self.n_dof, self.dof_ndim)
+        qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
         lower_diag = self.tril_Minv
-        Mx = torch.cholesky_solve(x, lower_diag.unsqueeze(0), upper=False)
-        return Mx
+        M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
+        M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
+        return M_qdot
 
     def H(self, t, z):
         """ Compute the Hamiltonian H(t, x, p)
@@ -123,10 +124,10 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         xpt = xpt.permute(1, 0, 2)  # T x N x D -> N x T x D
 
         xpt = xpt.reshape(N, len(ts), 2, self.n_dof, self.dof_ndim)
-        xt, pt = z0.chunk(2, dim=-3)
+        xt, pt = xpt.chunk(2, dim=-3)
         # TODO: make Minv @ pt faster by L(L^T @ pt)
         vt = self.Minv.matmul(pt)
-        xvt = torch.stack(xt, vt, dim=-3)
+        xvt = torch.cat([xt, vt], dim=-3)
 
         return xvt
 
