@@ -4,16 +4,25 @@ from lie_conv.lieConv import Swish
 import math
 
 
-def FCtanh(chin, chout):
-    return nn.Sequential(nn.Linear(chin, chout), nn.Tanh())
+def FCtanh(chin, chout, zero_bias=False, orthogonal_init=False):
+    return nn.Sequential(Linear(chin, chout, zero_bias, orthogonal_init), nn.Tanh())
 
 
-def FCswish(chin, chout):
-    return nn.Sequential(nn.Linear(chin, chout), Swish())
+def FCswish(chin, chout, zero_bias=False, orthogonal_init=False):
+    return nn.Sequential(Linear(chin, chout, zero_bias, orthogonal_init), Swish())
 
 
-def FCsoftplus(chin, chout):
-    return nn.Sequential(nn.Linear(chin, chout), nn.Softplus())
+def FCsoftplus(chin, chout, zero_bias=False, orthogonal_init=False):
+    return nn.Sequential(Linear(chin, chout, zero_bias, orthogonal_init), nn.Softplus())
+
+
+def Linear(chin, chout, zero_bias=False, orthogonal_init=False):
+    linear = nn.Linear(chin, chout)
+    if zero_bias:
+        torch.nn.init.zeros_(linear.bias)
+    if orthogonal_init:
+        torch.nn.init.orthogonal_(linear.weight)
+    return linear
 
 
 class Reshape(nn.Module):

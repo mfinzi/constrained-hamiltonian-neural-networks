@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, tril_mask, mod_angles
+from biases.models.utils import FCsoftplus, Reshape, tril_mask, mod_angles, Linear
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
 from typing import Tuple, Union, Optional
 
@@ -14,7 +14,7 @@ class HNN(nn.Module, metaclass=Named):
         self,
         G,
         q_ndim: Optional[int] = None,
-        hidden_size: int = 150,
+        hidden_size: int = 200,
         num_layers: int = 3,
         canonical: bool = False,
         angular_dims: Union[Tuple, bool] = tuple(),
@@ -30,16 +30,22 @@ class HNN(nn.Module, metaclass=Named):
 
         chs = [q_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
-            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], 1),
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
             Reshape(-1)
         )
         print("HNN currently assumes potential energy depends only on q")
         print("HNN currently assumes time independent Hamiltonian")
 
         self.mass_net = nn.Sequential(
-            *[FCsoftplus(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], q_ndim * q_ndim),
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(chs[-1], q_ndim * q_ndim, zero_bias=True, orthogonal_init=True),
             Reshape(-1, q_ndim, q_ndim)
         )
         self.register_buffer("_tril_mask", tril_mask(torch.eye(q_ndim)))
@@ -73,7 +79,7 @@ class HNN(nn.Module, metaclass=Named):
         T = GeneralizedT(qdot, Minv)
         return T + V
 
-    def Minv(self, q: Tensor) -> Tensor:
+    def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
         """Compute the learned inverse mass matrix M^{-1}(q)
 
         Args:
@@ -83,6 +89,9 @@ class HNN(nn.Module, metaclass=Named):
         lower_triangular = self._tril_mask * self.mass_net(q)
         assert lower_triangular.ndim == 3
         Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1))
+        Minv = Minv + eps * torch.eye(
+            Minv.size(-1), device=Minv.device, dtype=Minv.dtype
+        )
         return Minv
 
     def M(self, q):
@@ -98,7 +107,11 @@ class HNN(nn.Module, metaclass=Named):
         def M_func(qdot):
             assert qdot.ndim == 2
             qdot = qdot.unsqueeze(-1)
-            return torch.cholesky_solve(qdot, lower_triangular, upper=False).squeeze(-1)
+            # M_times_qdot = torch.cholesky_solve(
+            #    qdot, lower_triangular, upper=False
+            # ).squeeze(-1)
+            M_times_qdot = torch.solve(qdot, self.Minv(q))[0].squeeze(-1)
+            return M_times_qdot
 
         return M_func
 
@@ -111,8 +124,9 @@ class HNN(nn.Module, metaclass=Named):
         Returns: N x D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
+        ret = self.dynamics(t, z)
         self.nfe += 1
-        return self.dynamics(t, z)
+        return ret
 
     def integrate(self, z0, ts, tol=1e-4):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics

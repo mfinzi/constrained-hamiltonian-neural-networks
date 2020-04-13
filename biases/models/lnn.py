@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCswish, Reshape, mod_angles
+from biases.models.utils import FCsoftplus, Reshape, mod_angles, Linear
 from biases.dynamics.lagrangian import LagrangianDynamics
 from typing import Tuple, Union, Optional
 
@@ -14,8 +14,8 @@ class LNN(nn.Module, metaclass=Named):
         self,
         G,
         q_ndim: Optional[int] = None,
-        hidden_size: int = 256,
-        num_layers: int = 4,
+        hidden_size: int = 200,
+        num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
         wgrad: bool = True,
         **kwargs
@@ -28,8 +28,11 @@ class LNN(nn.Module, metaclass=Named):
         self.q_ndim = q_ndim
         chs = [2 * q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
-            *[FCswish(chs[i], chs[i + 1]) for i in range(num_layers)],
-            nn.Linear(chs[-1], 1),
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
             Reshape(-1)
         )
         print("LNN currently assumes time independent Lagrangian")
@@ -52,7 +55,7 @@ class LNN(nn.Module, metaclass=Named):
         self.nfe += 1
         return ret
 
-    def L(self, t: Tensor, z: Tensor, eps=1e-1):
+    def L(self, t: Tensor, z: Tensor, eps=1e-4):
         """ Compute the Lagrangian L(t, q, qdot)
         Args:
             t: Scalar Tensor representing time
@@ -67,7 +70,7 @@ class LNN(nn.Module, metaclass=Named):
         q_mod = mod_angles(q, self.angular_dims)
         z_mod = torch.cat([q_mod, qdot], dim=-1)
         # Add regularization to prevent singular mass matrix at initialization
-        # equivalent to adding eps to the diagonal of the mass Hessian
+        # equivalent to adding eps to the diagonal of the mass matrix (Hessian of L)
         # Note that the network could learn to offset this added term
         reg = eps * (qdot * qdot).sum(-1)
         return self.net(z_mod) + reg
