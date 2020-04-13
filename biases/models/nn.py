@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torchdiffeq import odeint
-from lie_conv.utils import export, Named
+from oil.utils.utils import export, Named
 from biases.models.utils import FCswish
 import numpy as np
 from typing import Tuple, Union

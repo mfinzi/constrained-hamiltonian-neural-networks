@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torchdiffeq import odeint
-from lie_conv.utils import export, Named
+from oil.utils.utils import export, Named
 from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import Trivial
 from biases.models.utils import FCtanh, tril_mask

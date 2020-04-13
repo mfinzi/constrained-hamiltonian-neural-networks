@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from oil.utils.utils import Eval
 from oil.model_trainers import Trainer
-from lie_conv.utils import export
+from oil.utils.utils import export
 import numpy as np
 
 
