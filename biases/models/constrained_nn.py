@@ -32,8 +32,7 @@ class CH(nn.Module):  # abstract constrained Hamiltonian network class
         self.nfe = 0
         self.wgrad = wgrad
         self.n_dof = len(G.nodes)
-        # Default set to 2 because each angle is 2 coordinates
-        self.dof_ndim = 2 if dof_ndim is None else dof_ndim
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
         self._Minv_net = torch.nn.Parameter(torch.eye(self.n_dof))
         self.register_buffer("_tril_mask", tril_mask(self._Minv_net))
         print("CH currently assumes potential energy depends only on q")
