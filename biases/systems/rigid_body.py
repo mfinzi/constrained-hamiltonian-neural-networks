@@ -3,6 +3,8 @@ import networkx as nx
 from torchdiffeq import odeint  # odeint_adjoint as odeint
 from oil.utils.utils import Named, export
 from biases.animation import Animation
+from biases.dynamics.hamiltonian import ConstrainedHamiltonianDynamics, EuclideanT
+import numpy as np
 
 
 @export
