@@ -13,6 +13,7 @@ class HNN(nn.Module, metaclass=Named):
     def __init__(
         self,
         G,
+        dof_ndim: Optional[int] = None,
         q_ndim: Optional[int] = None,
         hidden_size: int = 200,
         num_layers: int = 3,
@@ -23,6 +24,8 @@ class HNN(nn.Module, metaclass=Named):
     ):
         super().__init__(**kwargs)
         self.nfe = 0
+        if dof_ndim is not None:
+            print("HNN ignores dof_ndim")
         q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
         self.q_ndim = q_ndim
         self.canonical = canonical
