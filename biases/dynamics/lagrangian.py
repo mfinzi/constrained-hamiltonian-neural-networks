@@ -42,7 +42,9 @@ class LagrangianDynamics(nn.Module):
             dL_dz = grad(L, z, create_graph=True)[0]  # gradient
             dL_dq = dL_dz[..., :d]
             dL_dv = dL_dz[..., d:]
-            Fv = -grad((dL_dq * v.detach()).sum(), v, create_graph=True)[0]
+            Fv = -grad(
+                (dL_dq * v.detach()).sum(), v, create_graph=True, allow_unused=True
+            )[0]
             # elements in mb are independent, gives mb gradients
             eye = torch.eye(d, device=z.device, dtype=z.dtype)
             M = torch.stack(

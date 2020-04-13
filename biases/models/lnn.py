@@ -55,7 +55,7 @@ class LNN(nn.Module, metaclass=Named):
         self.nfe += 1
         return ret
 
-    def L(self, t: Tensor, z: Tensor, eps=1e-4):
+    def L(self, t: Tensor, z: Tensor, eps=1e-1):
         """ Compute the Lagrangian L(t, q, qdot)
         Args:
             t: Scalar Tensor representing time
