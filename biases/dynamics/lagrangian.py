@@ -4,7 +4,7 @@ from torchdiffeq import odeint
 from torch.autograd import grad
 from torch import Tensor
 from typing import Callable
-from lie_conv.utils import export
+from oil.utils.utils import export
 
 
 @export
@@ -16,7 +16,7 @@ class LagrangianDynamics(nn.Module):
         wgrad: If True, the dynamics can be backproped.
     """
 
-    def __init__(self, L: Callable[[Tensor, Tensor], Tensor], wgrad: bool = False):
+    def __init__(self, L: Callable[[Tensor, Tensor], Tensor], wgrad: bool = True):
         super().__init__()
         self.L = L
         self.wgrad = wgrad
@@ -28,8 +28,8 @@ class LagrangianDynamics(nn.Module):
             z: N x D Tensor of the N different states in D dimensions
         """
         assert (t.ndim == 0) and (z.ndim == 2)
-        two_d = z.shape[-1]
-        d = two_d // 2
+        D = z.shape[-1]
+        d = D // 2
         with torch.enable_grad():
             q = z[..., :d]
             v = z[..., d:]
