@@ -98,7 +98,7 @@ def EuclideanT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     Note that in Euclidean space, Minv only mixes degrees of freedom, not their individual dimensions
 
     Args:
-        p: N x ndof x D Tensor representing the canonical momentum
+        p: N x ndof x D Tensor representing the canonical momentum in Cartesian coordinates
         Minv: N x ndof x ndof Tensor representing the inverse mass matrix. Can be a
             callable that computes Minv(p) as well
     """
