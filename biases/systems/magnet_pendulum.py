@@ -8,7 +8,8 @@ import numpy as np
 
 @export
 class MagnetPendulum(RigidBody):
-    def __init__(self, mass=1, l=1, q=1, magnets=4):
+    d=3
+    def __init__(self, mass=1, l=1, q=.05, magnets=5):
         self.body_graph = nx.Graph()
         self.body_graph.add_node(0, m=mass, tether=torch.zeros(3), l=l)
         self.q = q  # magnetic moment magnitude
@@ -35,24 +36,19 @@ class MagnetPendulum(RigidBody):
 
     def potential(self, x):
         """ Gravity potential """
-        gpe = x[..., 0, 2]  # (self.M @ x)[..., 2].sum(1)
+        gpe = (self.M@x)[...,:,2].sum(-1)# (self.M @ x)[..., 2].sum(1)
         ri = self.magnet_positions
-        mi = self.magnet_dipoles[None]  # (1,magnets,d)
-        r0 = x.unsqueeze(-2)  # (bs,1,d) -> (bs,d)
-        m0 = (-1 * self.q * r0 / (r0 ** 2).sum(-1, keepdims=True))[:, None]  # (bs,1,d)
-        r0i = ri[None] - r0[:, None]  # (bs,magnets,d)
-        m0dotr0i = (m0 * r0i).sum(
-            -1
-        )  # (r0i@m0.transpose(-1,-2)).squeeze(-1) # (bs,magnets)
-        midotr0i = (mi * r0i).sum(-1)
-        m0dotmi = (m0 * mi).sum(-1)
-        r0inorm2 = (r0i * r0i).sum(-1)
-        dipole_energy = (
-            3
-            * (m0dotr0i * midotr0i - r0inorm2 * m0dotmi)
-            / (4 * np.pi * r0inorm2 ** (5 / 2))
-        )  # (bs,magnets)
-        return gpe - dipole_energy.sum(-1)  # (bs,)
+        mi = self.magnet_dipoles[None] # (1,magnets,d)
+        r0 = x.squeeze(-2) # (bs,1,d) -> (bs,d)
+        m0 = (-1*self.q*r0/(r0**2).sum(-1,keepdims=True))[:,None] #(bs,1,d)
+        r0i = ri[None]-r0[:,None] # (bs,magnets,d)
+        m0dotr0i = (m0*r0i).sum(-1)#(r0i@m0.transpose(-1,-2)).squeeze(-1) # (bs,magnets)
+        midotr0i = (mi*r0i).sum(-1)
+        m0dotmi = (m0*mi).sum(-1)
+        r0inorm2 = (r0i*r0i).sum(-1)
+        dipole_energy = ((-3*m0dotr0i*midotr0i-r0inorm2*m0dotmi)/(4*np.pi*r0inorm2**(5/2))).sum(-1) # (bs,)
+        return gpe + dipole_energy #(bs,)
+
 
     def __str__(self):
         return f"{self.__class__}{len(self.body_graph.nodes)}"

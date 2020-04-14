@@ -8,8 +8,10 @@ from biases.animation import Animation
 
 @export
 class ChainPendulum(RigidBody):
+    d=2
     def __init__(self, links=2, beams=False, m=1, l=1):
         self.body_graph = nx.Graph()
+        self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
         if beams:
             self.body_graph.add_node(
                 0, m=m, tether=torch.zeros(2), l=l
@@ -85,7 +87,7 @@ class ChainPendulum(RigidBody):
         return (self.M @ x)[..., 1].sum(1)
 
     def __str__(self):
-        return f"{self.__class__}{len(self.body_graph.nodes)}"
+        return f"{self.__class__}{self.arg_string}"
 
     def __repr__(self):
         return str(self)

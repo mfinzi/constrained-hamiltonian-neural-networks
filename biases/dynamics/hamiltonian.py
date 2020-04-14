@@ -91,7 +91,7 @@ def Proj(DPhi):
 
     return _P
 
-
+@export
 def EuclideanT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     """p^T Minv p/2 kinetic energy in Euclidean space.
 
@@ -109,7 +109,7 @@ def EuclideanT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     T = (p * Minv_p).sum((-1, -2)) / 2.0
     return T
 
-
+@export
 def GeneralizedT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     """p^T Minv p/2 kinetic energy in generalized coordinates
 
