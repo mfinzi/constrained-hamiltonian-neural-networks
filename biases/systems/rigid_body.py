@@ -106,58 +106,56 @@ class RigidBody(object, metaclass=Named):
     def animator(self):
         return Animation
 
+def point2point_constraints(G,x,v,Minv):
+    """ inputs [Graph] [x (bs,n,d)] [v (bs,n,d)]
+        outputs [DPhi (bs,2,n,d,2,C)] """
+    bs,n,d = x.shape
+    DPhi = torch.zeros(bs, 2, n, d, 2,len(G.edges), device=x.device, dtype=x.dtype)
+    for cid,(i,j) in enumerate(G.edges):
+        # Fill out dphi/dx
+        DPhi[:, 0,i, :, 0,cid] = 2 * (x[:, i] - x[:, j])
+        DPhi[:, 0,j, :, 0,cid] = 2 * (x[:, j] - x[:, i])
+        # Fill out d\dot{phi}/dx
+        DPhi[:, 0,i, :, 1,cid] = 2 * (v[:, i] - v[:, j])
+        DPhi[:, 0,j, :, 1,cid] = 2 * (v[:, j] - v[:, i])
+        # Fill out d\dot{phi}/dp
+        DPhi[:, 1,:, :, 1,cid] = (2 * (x[:, i] - x[:, j])[:, None, :] * (Minv[:, i] - Minv[:, j])[:, :, None])
+    return DPhi
+
+def point2tether_constraints(G,x,v,Minv):
+    """ inputs [Graph] [x (bs,n,d)] [v (bs,n,d)]
+        outputs [DPhi (bs,2,n,d,2,C)] """
+    bs,n,d = x.shape
+    tethers = nx.get_node_attributes(G,"tether")
+    DPhi = torch.zeros(bs, 2, n, d, 2,len(tethers), device=x.device, dtype=x.dtype)
+    for cid, (i, pos) in enumerate(tethers.items()):
+        ci = pos[None].to(x.device)
+        DPhi[:,0, i, :, 0,cid] = 2 * (x[:, i] - ci)
+        DPhi[:,0, i, :, 1,cid] = 2 * v[:, i]
+        DPhi[:,1, :, :, 1,cid] = (2 * (x[:, i] - ci)[:, None, :] * (Minv[:, i])[:, :, None])
+    return DPhi
+
+def axis_constraints(G,x,v,Minv):
+    """ inputs [Graph] [x (bs,n,d)] [v (bs,n,d)]
+        outputs [DPhi (bs,2,n,d,2,C)] """
+    bs,n,d = x.shape
+    axis_constrs = nx.get_node_attributes(G, "pos_cnstr")
+    DPhi = torch.zeros(bs, 2, n, d, 2,len(axis_constrs), device=x.device, dtype=x.dtype)
+    for cid,(i, axis) in enumerate(axis_constrs.items()):
+        DPhi[:,0, i, axis, 0,cid] = 1
+        DPhi[:,0, :, axis, 1,cid] = Minv[:, i]
+    return DPhi
 
 def rigid_DPhi(rigid_body_graph, Minv, z):
-    """inputs [Graph (n,E)] [x (bs,n,d)] [p (bs,n,d)] [Minv (bs, n, n)]
-       ouput [DPhi (bs, 2nd, 2E)]"""
+    """inputs [Graph (n,E)] [z (bs,2nd)] [Minv (bs, n, n)]
+       ouput [DPhi (bs, 2nd, 2C)]"""
     n = Minv.shape[-1]
     bs, D = z.shape  # of ODE dims, 2*num_particles*space_dim
     x = z[:, : D // 2].reshape(bs, n, -1)
     p = z[:, D // 2 :].reshape(bs, n, -1)
     bs, n, d = x.shape
-
     G = rigid_body_graph
-    tethers = nx.get_node_attributes(G, "tether")
-    pos_constraints = nx.get_node_attributes(G, "pos_cnstr")
-    NC = (
-        len(G.edges) + len(tethers) + len(pos_constraints)
-    )  # total number of constraints
     v = Minv @ p
-    dphi_dx = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
-    dphi_dp = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
-    dphid_dx = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
-    dphid_dp = torch.zeros(bs, n, d, NC, device=z.device, dtype=z.dtype)
-    cid = 0  # constraint id
-    for e in G.edges:
-        i, j = e
-        # Fill out dphi/dx
-        dphi_dx[:, i, :, cid] = 2 * (x[:, i] - x[:, j])
-        dphi_dx[:, j, :, cid] = 2 * (x[:, j] - x[:, i])
-        # Fill out d\dot{phi}/dx
-        dphid_dx[:, i, :, cid] = 2 * (v[:, i] - v[:, j])
-        dphid_dx[:, j, :, cid] = 2 * (v[:, j] - v[:, i])
-        # Fill out d\dot{phi}/dp
-        dphid_dp[:, :, :, cid] = (
-            2 * (x[:, i] - x[:, j])[:, None, :] * (Minv[:, i] - Minv[:, j])[:, :, None]
-        )
-        cid += 1
-    for (i, pos) in tethers.items():
-        ci = pos[None].to(x.device)
-        dphi_dx[:, i, :, cid] = 2 * (x[:, i] - ci)
-        dphid_dx[:, i, :, cid] = 2 * v[:, i]
-        dphid_dp[:, :, :, cid] = (
-            2 * (x[:, i] - ci)[:, None, :] * (Minv[:, i])[:, :, None]
-        )
-        cid += 1
-    for (i, axis) in pos_constraints.items():
-        dphi_dx[:, i, axis, cid] = 1
-        dphid_dp[:, :, axis, cid] = Minv[:, i]
-        cid += 1
-    dPhi_dx = torch.cat(
-        [dphi_dx.reshape(bs, n * d, NC), dphid_dx.reshape(bs, n * d, NC)], dim=2
-    )
-    dPhi_dp = torch.cat(
-        [dphi_dp.reshape(bs, n * d, NC), dphid_dp.reshape(bs, n * d, NC)], dim=2
-    )
-    DPhi = torch.cat([dPhi_dx, dPhi_dp], dim=1)
-    return DPhi
+    constraints = (point2point_constraints,point2tether_constraints,axis_constraints)
+    DPhi = torch.cat([constraint(G,x,v,Minv) for constraint in constraints],dim=-1) 
+    return DPhi.reshape(bs,2*n*d,-1) #(bs,2,n,d,2,C)->#(bs,2nd,2C)
