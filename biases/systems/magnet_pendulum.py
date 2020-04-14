@@ -10,6 +10,7 @@ import numpy as np
 class MagnetPendulum(RigidBody):
     d=3
     def __init__(self, mass=1, l=1, q=.05, magnets=5):
+        self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
         self.body_graph = nx.Graph()
         self.body_graph.add_node(0, m=mass, tether=torch.zeros(3), l=l)
         self.q = q  # magnetic moment magnitude
@@ -18,9 +19,7 @@ class MagnetPendulum(RigidBody):
             [0.1 * theta.cos(), 0.1 * theta.sin(), -(1.2) * l * torch.ones_like(theta)],
             dim=-1,
         )
-        self.magnet_dipoles = q * torch.stack(
-            [0 * theta, 0 * theta, torch.ones_like(theta)], dim=-1
-        )  # +z direction
+        self.magnet_dipoles = q*torch.stack([0*theta, 0*theta, torch.ones_like(theta)], dim=-1)  # +z direction
 
     def sample_initial_conditions(self, N):
         n = len(self.body_graph.nodes)
@@ -51,7 +50,7 @@ class MagnetPendulum(RigidBody):
 
 
     def __str__(self):
-        return f"{self.__class__}{len(self.body_graph.nodes)}"
+        return f"{self.__class__}{self.arg_string}"
 
     def __repr__(self):
         return str(self)
