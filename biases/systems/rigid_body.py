@@ -6,6 +6,16 @@ from biases.animation import Animation
 from biases.dynamics.hamiltonian import ConstrainedHamiltonianDynamics, EuclideanT
 import numpy as np
 
+@export
+class BodyGraph(nx.Graph):
+    def add_extended_nd(self,key,m,moments,d=3):
+        self.add_node(f'{key}_{0}',m=m) # com node
+        for i in range(1,1+d):
+            self.add_node(f'{key}_{i}')
+            self.add_edge(key,f'{key}_{i}',internal=True,l=1.,I=moments[i-1])
+            for j in range(1,1+d):
+                self.add_edge(f'{key}_{j}',f'{key}_{i}',internal=True,l=np.sqrt(2))
+            
 
 @export
 class RigidBody(object, metaclass=Named):
@@ -24,16 +34,11 @@ class RigidBody(object, metaclass=Named):
         M = torch.zeros(n, n).double()
         for i, mass in nx.get_node_attributes(self.body_graph, "m").items():
             M[i, i] += mass
-        for (i, j), mass in nx.get_edge_attributes(self.body_graph, "m").items():
-            M[i, i] += mass / 4
-            M[i, j] += mass / 4
-            M[j, i] += mass / 4
-            M[j, j] += mass / 4
-        for (i, j), inertia in nx.get_edge_attributes(self.body_graph, "I").items():
-            M[i, i] += inertia * mass
-            M[i, j] -= inertia * mass
-            M[j, i] -= inertia * mass
-            M[j, j] += inertia * mass
+        for (i,j), I in nx.get_edge_attributes(self.body_graph,"I").items():
+            M[i,i] += I
+            M[i,j] -= I
+            M[j,i] -= I
+            M[j,j] += I
         return M
 
     @property
@@ -61,6 +66,8 @@ class RigidBody(object, metaclass=Named):
 
     def body2globalCoords(self):
         raise NotImplementedError  # TODO: use nx.bfs_edges and tethers
+
+    
 
     def sample_initial_conditions(self, n_systems):
         raise NotImplementedError
@@ -110,8 +117,9 @@ def point2point_constraints(G,x,v,Minv):
     """ inputs [Graph] [x (bs,n,d)] [v (bs,n,d)]
         outputs [DPhi (bs,2,n,d,2,C)] """
     bs,n,d = x.shape
-    DPhi = torch.zeros(bs, 2, n, d, 2,len(G.edges), device=x.device, dtype=x.dtype)
-    for cid,(i,j) in enumerate(G.edges):
+    p2p_consrts = nx.get_edge_attributes(G,'l')
+    DPhi = torch.zeros(bs, 2, n, d, 2,len(p2p_consrts), device=x.device, dtype=x.dtype)
+    for cid,((i,j),_) in enumerate(p2p_consrts.items()):
         # Fill out dphi/dx
         DPhi[:, 0,i, :, 0,cid] = 2 * (x[:, i] - x[:, j])
         DPhi[:, 0,j, :, 0,cid] = 2 * (x[:, j] - x[:, i])

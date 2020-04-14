@@ -1,7 +1,7 @@
 import torch
 import networkx as nx
 from oil.utils.utils import export
-from biases.systems.rigid_body import RigidBody
+from biases.systems.rigid_body import RigidBody,BodyGraph
 from biases.systems.chain_pendulum import PendulumAnimation
 import numpy as np
 
@@ -11,7 +11,7 @@ class MagnetPendulum(RigidBody):
     d=3
     def __init__(self, mass=1, l=1, q=.05, magnets=5):
         self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
-        self.body_graph = nx.Graph()
+        self.body_graph = BodyGraph()
         self.body_graph.add_node(0, m=mass, tether=torch.zeros(3), l=l)
         self.q = q  # magnetic moment magnitude
         theta = torch.linspace(0, 2 * np.pi, magnets + 1)[:-1]
