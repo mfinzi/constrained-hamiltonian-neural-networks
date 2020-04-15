@@ -97,6 +97,22 @@ class ChainPendulum(RigidBody):
     def animator(self):
         return PendulumAnimation
 
+class ChainPendulumV2(ChainPendulum):
+    def __init__(self, links=2, beams=False, m=1, l=1):
+        self.body_graph = BodyGraph()#nx.Graph()
+        self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
+        beam_moments = torch.tensor([m*l*l/12])
+        if beams:
+            self.body_graph.add_extended_nd(0, m=m,moments=beam_moments, d=1)
+            self.body_graph.add_joint(0,torch.tensor([l/2]))
+            for i in range(1, links):
+                self.body_graph.add_extended_nd(i, m=m,moments=beam_moments, d=1)
+                self.body_graph.add_joint(i-1,torch.tensor([-l/2]),i,torch.tensor([l/2]))
+        else:
+            self.body_graph.add_node(0, m=m, tether=torch.zeros(2), l=l)
+            for i in range(1, links):
+                self.body_graph.add_node(i, m=m)
+                self.body_graph.add_edge(i - 1, i, l=l)
 
 class PendulumAnimation(Animation):
     def __init__(self, qt, body):
