@@ -2,21 +2,24 @@ import torch
 import networkx as nx
 import numpy as np
 from oil.utils.utils import export
-from biases.systems.rigid_body import RigidBody
+from biases.systems.rigid_body import RigidBody, BodyGraph
 from biases.animation import Animation
 
 
 @export
 class ChainPendulum(RigidBody):
+    d=2
     def __init__(self, links=2, beams=False, m=1, l=1):
-        self.body_graph = nx.Graph()
+        self.body_graph = BodyGraph()#nx.Graph()
+        self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
         if beams:
-            self.body_graph.add_node(
-                0, m=m, tether=torch.zeros(2), l=l
-            )  # TODO: massful tether
-            for i in range(1, links):
-                self.body_graph.add_node(i)
-                self.body_graph.add_edge(i - 1, i, m=m, I=1 / 12, l=l)
+            assert False, "beams temporarily not supported"
+            # self.body_graph.add_node(
+            #     0, m=m, tether=torch.zeros(2), l=l
+            # )  # TODO: massful tether
+            # for i in range(1, links):
+            #     self.body_graph.add_node(i)
+            #     self.body_graph.add_edge(i - 1, i, m=m, I=1 / 12, l=l)
         else:
             self.body_graph.add_node(0, m=m, tether=torch.zeros(2), l=l)
             for i in range(1, links):
@@ -85,7 +88,7 @@ class ChainPendulum(RigidBody):
         return (self.M @ x)[..., 1].sum(1)
 
     def __str__(self):
-        return f"{self.__class__}{len(self.body_graph.nodes)}"
+        return f"{self.__class__}{self.arg_string}"
 
     def __repr__(self):
         return str(self)

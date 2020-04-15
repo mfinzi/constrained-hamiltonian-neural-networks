@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torchdiffeq import odeint
-from oil.utils.utils import export
 from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import Trivial
 from biases.models.utils import FCtanh, tril_mask, Linear, Reshape
@@ -11,9 +10,9 @@ from biases.dynamics.hamiltonian import (
 )
 from biases.systems.rigid_body import rigid_DPhi
 from typing import Optional, Tuple, Union
+from lie_conv.utils import Expression, export, Named
 
-
-class CH(nn.Module):  # abstract constrained Hamiltonian network class
+class CH(nn.Module,metaclass=Named):  # abstract constrained Hamiltonian network class
     def __init__(
         self,
         G,

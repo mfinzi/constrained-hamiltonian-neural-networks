@@ -65,7 +65,7 @@ def PendulumLagrangian(z: Tensor):
     v = z[..., 1]
     return v * v / 2 + (q.cos() - 1)
 
-
+@export
 def LagrangianFlow(
     L: Callable[[Tensor, Tensor], Tensor], z0: Tensor, T: Tensor, higher: bool = False
 ) -> Tensor:

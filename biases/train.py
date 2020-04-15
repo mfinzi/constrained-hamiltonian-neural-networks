@@ -6,25 +6,15 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from oil.utils.utils import LoaderTo, islice, FixedNumpySeed, cosLr
-from biases.chainPendulum import ChainPendulum
-import biases.hamiltonian as hamiltonian
+from biases.systems.chain_pendulum import ChainPendulum
 import biases.datasets as datasets
-import biases.dynamicsTrainer as dynamicsTrainer
+from biases.models import HNN,LNN,NN,CHNN,CHLC
 from biases.datasets import RigidBodyDataset
-from biases.dynamicsTrainer import NN, CHNN, CHLC, IntegratedDynamicsTrainer
+from biases.dynamics_trainer import IntegratedDynamicsTrainer
+import biases.models as models
+import biases.systems as systems
 import lie_conv.lieGroups as lieGroups
 import pickle
-# from lie_conv.dynamics_trial import DynamicsTrial
-try:
-    import lie_conv.graphnets as graphnets
-except ImportError:
-    import lie_conv.lieConv as graphnets
-
-    warnings.warn(
-        "Failed to import graphnets. Please install using \
-                `pip install .[GN]` for this functionality",
-        ImportWarning,
-    )
 
 # network = HNN, LNN, NN, CHNN
 def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
@@ -33,15 +23,14 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
          bs=200,num_epochs=100,trainer_config={}):
     # Create Training set and model
     splits = {"train": n_train,"test": 200}
-    dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=body,
-                     dt=dt, integration_time=10,angular_coords=angular)
     with FixedNumpySeed(0):
+        dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=body,
+                        dt=dt, integration_time=10,angular_coords=angular)
         datasets = split_dataset(dataset, splits)
-    if angular:
-        model = network(G=dataset.body.body_graph,angular_dims=angular,**net_cfg).to(device=device, dtype=dtype)
-    else:
-        model = network(G=dataset.body.body_graph,d=2,**net_cfg).to(device=device, dtype=dtype)
 
+    angular = not isinstance(network,(CHNN,CHLC))
+    model = network(dataset.body.body_graph,dataset.body.d,angular_dims=angular,**net_cfg)
+    model = model.to(device=device, dtype=dtype)
     # Create train and Dev(Test) dataloaders and move elems to gpu
     dataloaders = {k: LoaderTo(
                 DataLoader(v, batch_size=min(bs, splits[k]), num_workers=0, shuffle=(k == "train")),
@@ -51,7 +40,7 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
     opt_constr = lambda params: Adam(params, lr=lr)
     lr_sched = cosLr(num_epochs)
     return IntegratedDynamicsTrainer(model,dataloaders,opt_constr,lr_sched,
-                                     log_args={"timeFrac": 1 / 4, "minPeriod": 0.0},**trainer_config)
+                            log_args={"timeFrac": 1 / 4, "minPeriod": 0.0},**trainer_config)
 
 
 #Trial = train_trial(makeTrainer)
@@ -59,7 +48,8 @@ if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
         #defaults["save"] = False
-        cfg = argupdated_config(defaults, namespace=(dynamicsTrainer, lieGroups, datasets, graphnets,hamiltonian))
+        namespace = (lieGroups,datasets,systems,models)
+        cfg = argupdated_config(defaults, namespace=namespace)
         cfg.pop('local_rank')
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
