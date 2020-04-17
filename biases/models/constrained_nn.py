@@ -10,9 +10,10 @@ from biases.dynamics.hamiltonian import (
 )
 from biases.systems.rigid_body import rigid_DPhi
 from typing import Optional, Tuple, Union
-from lie_conv.utils import Expression, export, Named
+from lie_conv.utils import export, Named
 
-class CH(nn.Module,metaclass=Named):  # abstract constrained Hamiltonian network class
+
+class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian network class
     def __init__(
         self,
         G,
@@ -178,43 +179,53 @@ class CHNN(CH):
 
 @export
 class CHLC(CH, LieResNet):
-    # TODO: cleanup
     def __init__(
         self,
         G,
-        d=2,
+        dof_ndim: Optional[int] = None,
+        q_ndim: Optional[int] = None,
+        angular_dims: Union[Tuple, bool] = tuple(),
+        hidden_size=200,
+        num_layers=3,
+        wgrad=True,
         bn=False,
-        num_layers=4,
         group=Trivial(2),
-        k=384,
         knn=False,
         nbhd=100,
         mean=True,
         **kwargs
     ):
-        chin = len(G.nodes())
+        n_dof = len(G.nodes())
         super().__init__(
             G=G,
-            chin=chin,
+            dof_ndim=dof_ndim,
+            q_ndim=q_ndim,
+            angular_dims=angular_dims,
+            wgrad=wgrad,
+            chin=n_dof,
             ds_frac=1,
             num_layers=num_layers,
             nbhd=nbhd,
             mean=mean,
             bn=bn,
-            xyz_dim=d,
+            xyz_dim=dof_ndim,
             group=group,
             fill=1.0,
-            k=k,
+            k=hidden_size,
             num_outputs=1,
             cache=False,
             knn=knn,
             **kwargs
         )
-        self.nfe = 0
 
     def compute_V(self, x):
         """ Input is a canonical position variable and the system parameters,
-            shapes (bs, n,d) and (bs,n,c)"""
+        Args:
+            x: (N x n_dof x dof_ndim) sized Tensor representing the position in
+            Cartesian coordinates
+        Returns: a length N Tensor representing the potential energy
+        """
+        assert x.ndim == 3
         mask = ~torch.isnan(x[..., 0])
         # features = torch.zeros_like(x[...,:1])
         bs, n, d = x.shape
