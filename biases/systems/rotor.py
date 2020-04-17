@@ -12,5 +12,6 @@ class Rotor(RigidBody):
         self.body_graph.add_extended_nd(0,m=mass,moments,d=3):
     def sample_initial_conditions(self,N):
         raise NotImplementedError
+        #i = self.body.key2id[node]
     def potential(self,x):
         return 0
