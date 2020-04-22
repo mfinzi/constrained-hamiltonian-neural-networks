@@ -6,6 +6,7 @@ from biases.animation import Animation
 from biases.dynamics.hamiltonian import ConstrainedHamiltonianDynamics, EuclideanT
 import numpy as np
 from collections import OrderedDict
+from scipy.spatial.transform import Rotation
 
 @export
 class BodyGraph(nx.Graph):
@@ -14,7 +15,8 @@ class BodyGraph(nx.Graph):
         super().__init__()
         self.key2id = OrderedDict()
     def add_node(self,key,*args,**kwargs):
-        self.key2id[key]=len(self)
+        #print(key,len(self.key2id),self.key2id)
+        self.key2id[key]=len(self.key2id)
         super().add_node(key,*args,**kwargs)
 
     def add_extended_nd(self,key,m,moments,d=3):
@@ -23,7 +25,7 @@ class BodyGraph(nx.Graph):
             along principle directions. 
             d specifies the dimensional extent of the rigid body:
             d=0 is a point mass with 1dof, 
-            d=1 is a 1d object (eg beam) with 2dof
+            d=1 is a 1d nodesobject (eg beam) with 2dof
             d=2 is a 2d object (eg plane or disk) with 3dof
             d=3 is a 3d object (eg box,sphere) with 4dof"""
         self.add_node(key,m=m,d=d)
@@ -31,7 +33,7 @@ class BodyGraph(nx.Graph):
             child_key = f'{key}_{i}'
             self.add_node(child_key)
             self.add_edge(key,child_key,internal=True,l=1.,I=moments[i-1])
-            for j in range(d):
+            for j in range(i):
                 self.add_edge(f'{key}_{j}',child_key,internal=True,l=np.sqrt(2))
 
     def add_joint(key1,pos1,key2=None,pos2=None):
@@ -61,9 +63,11 @@ class RigidBody(object, metaclass=Named):
         """ """
         n = len(self.body_graph.nodes)
         M = torch.zeros(n, n).double()
-        for i, mass in nx.get_node_attributes(self.body_graph, "m").items():
+        for ki, mass in nx.get_node_attributes(self.body_graph, "m").items():
+            i = self.body_graph.key2id[ki]
             M[i, i] += mass
-        for (i,j), I in nx.get_edge_attributes(self.body_graph,"I").items():
+        for (ki,kj), I in nx.get_edge_attributes(self.body_graph,"I").items():
+            i,j = self.body_graph.key2id[ki],self.body_graph.key2id[kj]
             M[i,i] += I
             M[i,j] -= I
             M[j,i] -= I
