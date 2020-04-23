@@ -3,7 +3,7 @@ import torch.nn as nn
 from torchdiffeq import odeint
 from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import Trivial
-from biases.models.utils import FCtanh, tril_mask, Linear, Reshape
+from biases.models.utils import FCtanh, Linear, Reshape
 from biases.dynamics.hamiltonian import (
     EuclideanT,
     ConstrainedHamiltonianDynamics,
@@ -18,7 +18,6 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
         wgrad=True,
         **kwargs
@@ -26,8 +25,6 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         super().__init__(**kwargs)
         if angular_dims != tuple():
             print("CH ignores angular_dims")
-        if q_ndim is not None:
-            print("CH ignores q_ndim")
         self.G = G
         self.nfe = 0
         self.wgrad = wgrad
@@ -37,15 +34,22 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         self.dynamics = ConstrainedHamiltonianDynamics(
             self.H, self.DPhi, wgrad=self.wgrad
         )
-        self._Minv_net = torch.nn.Parameter(torch.eye(self.n_dof))
-        self.register_buffer("_tril_mask", tril_mask(self._Minv_net))
+        self._Minv = torch.nn.Parameter(torch.eye(self.n_dof))
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
 
     @property
     def tril_Minv(self):
-        return self._tril_mask * self._Minv_net
+        res = torch.triu(self._Minv, diagonal=1)
+        # Constrain diagonal of Cholesky to be positive
+        res = res + torch.diag_embed(
+            torch.nn.functional.softplus(torch.diagonal(self._Minv, dim1=-2, dim2=-1)),
+            dim1=-2,
+            dim2=-1,
+        )
+        res = res.transpose(-1, -2)  # Make lower triangular
+        return res
 
     @property
     def Minv(self):
@@ -140,7 +144,6 @@ class CHNN(CH):
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
         hidden_size: int = 200,
         num_layers=3,
@@ -148,12 +151,7 @@ class CHNN(CH):
         **kwargs
     ):
         super().__init__(
-            G=G,
-            dof_ndim=dof_ndim,
-            q_ndim=q_ndim,
-            angular_dims=angular_dims,
-            wgrad=wgrad,
-            **kwargs
+            G=G, dof_ndim=dof_ndim, angular_dims=angular_dims, wgrad=wgrad, **kwargs
         )
         n = len(G.nodes())
         chs = [n * self.dof_ndim] + num_layers * [hidden_size]
@@ -183,7 +181,6 @@ class CHLC(CH, LieResNet):
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
         hidden_size=200,
         num_layers=3,
@@ -199,7 +196,6 @@ class CHLC(CH, LieResNet):
         super().__init__(
             G=G,
             dof_ndim=dof_ndim,
-            q_ndim=q_ndim,
             angular_dims=angular_dims,
             wgrad=wgrad,
             chin=n_dof,

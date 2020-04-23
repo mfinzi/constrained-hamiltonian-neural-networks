@@ -12,7 +12,6 @@ class NN(nn.Module, metaclass=Named):
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         hidden_size: int = 200,
         num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
@@ -22,23 +21,22 @@ class NN(nn.Module, metaclass=Named):
         super().__init__(**kwargs)
         if wgrad:
             print("NN ignores wgrad")
-        self.q_ndim = q_ndim
         self.n_dof = len(G.nodes)
         self.dof_ndim = 1 if dof_ndim is None else dof_ndim
         self.q_ndim = self.n_dof * self.dof_ndim
 
-        chs = [2 * q_ndim] + num_layers * [hidden_size]
+        chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], 2 * q_ndim, zero_bias=True, orthogonal_init=True)
+            Linear(chs[-1], 2 * self.q_ndim, zero_bias=True, orthogonal_init=True)
         )
         print("NN currently assumes time independent ODE")
         self.nfe = 0
         self.angular_dims = (
-            list(range(q_ndim)) if angular_dims is True else angular_dims
+            list(range(self.q_ndim)) if angular_dims is True else angular_dims
         )
 
     def forward(self, t, z):
