@@ -14,6 +14,8 @@ from typing import Union, Tuple
 import sys
 import argparse
 import numpy as np
+import csv
+import os
 
 
 def str_to_class(classname):
@@ -160,7 +162,7 @@ if __name__ == "__main__":
         dataset=RigidBodyDataset,
         dt=0.1,
         lr=args.lr,
-        network=str_to_class(args.network),  # TODO
+        network=str_to_class(args.network),
         n_test=args.n_test,
         n_train=args.n_train,
         n_val=args.n_val,
@@ -169,17 +171,33 @@ if __name__ == "__main__":
         regen=args.regen,
     )
 
+    # Create target directory & all intermediate directories if don't exists
+    if not os.path.exists(args.exp_dir):
+        os.makedirs(args.exp_dir)
+        print("Directory ", args.exp_dir, " Created ")
+    else:
+        print("Directory ", args.exp_dir, " already exists")
+
+    with open(args.exp_dir + "/args.csv", "w") as csvfile:
+        args_dict = vars(args)  # convert to dict
+        writer = csv.DictWriter(csvfile, fieldnames=args_dict.keys())
+        writer.writeheader()
+        writer.writerow(args_dict)
+
     trainer.train(args.num_epochs)
 
+    print("Saving training logs")
     ax = trainer.logger.scalar_frame.plot()
     figure_path = args.exp_dir + "/log.png"
     ax.figure.savefig(figure_path)
 
-    model_path = args.exp_dir + "/model.pt"
-    torch.save(trainer.model.to("cpu").state_dict, model_path)
-
+    print("Saving test rollouts")
     rollouts_path = args.exp_dir + "/test_rollouts"
     rollout_errs = trainer.test_rollouts(
         angular_to_euclidean=not euclidean_coords, pert_eps=1e-4
     )
     np.save(rollouts_path, rollout_errs.detach().cpu().numpy())
+
+    print("Saving model state_dict")
+    model_path = args.exp_dir + "/model.pt"
+    torch.save(trainer.model.to("cpu").state_dict(), model_path)
