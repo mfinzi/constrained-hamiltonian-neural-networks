@@ -34,8 +34,8 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
-        self._moments = torch.nn.Parameter(torch.randn(self.n_dof,self.n_dof))
-        self._masses = torch.nn.Parameter(torch.randn(self.n_dof))
+        self._moments = torch.nn.Parameter(.1*torch.randn(self.n_dof,self.n_dof))
+        self._masses = torch.nn.Parameter(.1*torch.randn(self.n_dof))
 
     @property
     def M(self):
