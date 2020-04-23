@@ -4,7 +4,7 @@ from oil.utils.utils import export
 from biases.systems.rigid_body import RigidBody,BodyGraph
 from biases.systems.chain_pendulum import PendulumAnimation
 import numpy as np
-
+from biases.utils import bodyX2comEuler,comEuler2bodyX, frame2euler,euler2frame
 
 @export
 class MagnetPendulum(RigidBody):
@@ -32,6 +32,30 @@ class MagnetPendulum(RigidBody):
         )
         # xv[:,1,:,:]*= .1
         return xv
+    # def sample_initial_conditions(self,N):
+    #     angles_vel = torch.randn(N,2,2,1)
+    #     return self.body2globalCoords(angles_vel)
+
+    def global2bodyCoords(self, global_pos_vel):
+        """ input (bs,2,1,3) output (bs,2,dangular=2,1) """
+        *bsT2, n, d = global_pos_vel.shape
+        basis = torch.randn(*bsT2,3,d)
+        basis[:,:,2:] =global_pos_vel
+        basis[:,:,2:] /= (basis[:,:1,2:]**2).sum(-1,keepdims=True).sqrt()
+        basis[:,:,1] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,1]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
+        basis[:,:,1] /= (basis[:,:1,1]**2).sum(-1,keepdims=True).sqrt()
+        basis[:,:,0] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
+        basis[:,:,0] -=  basis[:,:,1]*(basis[:,:,1]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,1]**2).sum(-1,keepdims=True)
+        basis[:,:,0] /= (basis[:,:1,0]**2).sum(-1,keepdims=True).sqrt()
+        return frame2euler(basis)[:,:,:2].unsqueeze(-1)
+        
+    def body2globalCoords(self, angles_omega):
+        """ input (bs,2,dangular=2,1) output (bs,2,1,3) """
+        bs,_,_,_ = angles_omega.shape
+        euler_angles = torch.zeros(bs,2,3)
+        euler_angles[:,:,:2] = angles_omega.squeeze(-1)
+        zhat = euler2frame(euler_angles)[:,:,2]
+        return -zhat.unsqueeze(-2) # (bs,2,1,3)
 
     def potential(self, x):
         """ Gravity potential """
