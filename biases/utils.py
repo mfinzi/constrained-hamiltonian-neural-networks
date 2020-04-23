@@ -69,6 +69,7 @@ def bodyX2comEuler(X):
     euler = frame2euler(X[:,:,1:]-xcom[:,:,None,:])
     return torch.cat([xcom,euler],dim=-1)
 
+
 @export
 def comEuler2bodyX(com_euler):
     """ output: (bs,2,6) input: (bs,2,4,3) """
@@ -76,3 +77,22 @@ def comEuler2bodyX(com_euler):
     frame = euler2frame(com_euler[:,:,3:]) #(bs,2,3,3)
     shifted_frame = frame+xcom[:,:,None,:] # (bs,2,3,3)
     return torch.cat([xcom[:,:,None,:],shifted_frame],dim=-2)
+
+@export
+def read_obj(filename):
+    triangles = []
+    vertices = []
+    with open(filename) as file:
+        for line in file:
+            components = line.strip(' \n').split(' ')
+            if components[0] == "f": # face data
+                # e.g. "f 1/1/1/ 2/2/2 3/3/3 4/4/4 ..."
+                indices = list(map(lambda c: int(c.split('/')[0]) - 1, components[1:]))
+                for i in range(0, len(indices) - 2):
+                    triangles.append(indices[i: i+3])
+            elif components[0] == "v": # vertex data
+                # e.g. "v  30.2180 89.5757 -76.8089"
+                #print(components)
+                vertex = list(map(lambda c: float(c), components[2:]))
+                vertices.append(vertex)
+    return np.array(vertices), np.array(triangles)

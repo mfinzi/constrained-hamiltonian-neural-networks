@@ -36,7 +36,7 @@ class BodyGraph(nx.Graph):
             for j in range(i):
                 self.add_edge(f'{key}_{j}',child_key,internal=True,l=np.sqrt(2))
 
-    def add_joint(key1,pos1,key2=None,pos2=None):
+    def add_joint(self,key1,pos1,key2=None,pos2=None):
         """ adds a joint between extended bodies key1 and key2 at the position
             in the body frame 1 pos1 and body frame 2 pos2. pos1 and pos2 should
             be d dimensional vectors, where d is the dimension of the extended body."""
@@ -202,17 +202,19 @@ def joint_constraints(G,x,v):
         di = G.nodes[i]['d']
         dj = G.nodes[j]['d']
         for k in range(d):# (bs, di+1, d, d)
-            DPhi[:,0,i:1+di,k,0,jid,k] = c1t[None]
-            DPhi[:,0,j:1+dj,k,0,jid,k] = -c2t[None]
-            DPhi[:,1,i:1+di,k,1,jid,k] = c1t[None]
-            DPhi[:,1,j:1+dj,k,1,jid,k] = -c2t[None]
+            DPhi[:,0,i:i+1+di,k,0,jid,k] = c1t[None]
+            DPhi[:,0,j:j+1+dj,k,0,jid,k] = -c2t[None]
+            DPhi[:,1,i:i+1+di,k,1,jid,k] = c1t[None]
+            DPhi[:,1,j:j+1+dj,k,1,jid,k] = -c2t[None]
+    jid = len(edge_joints)
     for jid2, (ki,c1) in enumerate(node_joints.items()):
         i = G.key2id[ki]
         c1t = torch.cat([1-c1.sum()[None],c1])
         di = G.nodes[i]['d']
         for k in range(d):# (bs, di+1, d, d)
-            DPhi[:,0,i:1+di,k,0,jid2+jid,k] = c1t[None]
-            DPhi[:,1,i:1+di,k,1,jid2+jid,k] = c1t[None]
+            DPhi[:,0,i:i+1+di,k,0,jid2+jid,k] = c1t[None]
+            DPhi[:,1,i:i+1+di,k,1,jid2+jid,k] = c1t[None]
+    return DPhi.reshape(bs,2,n,d,2,-1)
 
 def point2tether_constraints(G,x,v):
     """ inputs [Graph] [x (bs,n,d)] [v (bs,n,d)]
@@ -250,7 +252,7 @@ def rigid_DPhi(rigid_body_graph, Minv, z):
     bs, n, d = x.shape
     G = rigid_body_graph
     v = Minv @ p
-    constraints = (point2point_constraints,point2tether_constraints)
+    constraints = (point2point_constraints,point2tether_constraints,joint_constraints)
     DPhi = torch.cat([constraint(G,x,v) for constraint in constraints],dim=-1)
     DPhi[:,1] = (Minv@DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
     return DPhi.reshape(bs,2*n*d,-1) #(bs,2,n,d,2,C)->#(bs,2nd,2C)

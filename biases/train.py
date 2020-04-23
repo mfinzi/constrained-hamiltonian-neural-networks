@@ -29,7 +29,7 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
         datasets = split_dataset(dataset, splits)
 
     angular = not isinstance(network,(CHNN,CHLC))
-    model = network(dataset.body.body_graph,dataset.body.d,angular_dims=angular,**net_cfg)
+    model = network(dataset.body.body_graph,dof_ndim =dataset.body.d,angular_dims=angular,**net_cfg)
     model = model.to(device=device, dtype=dtype)
     # Create train and Dev(Test) dataloaders and move elems to gpu
     dataloaders = {k: LoaderTo(
