@@ -1,5 +1,3 @@
-import torch
-import networkx as nx
 from oil.utils.utils import export
 from biases.systems.rigid_body import RigidBody,BodyGraph
 from biases.animation import Animation
@@ -8,6 +6,8 @@ from biases.utils import euler2frame,comEuler2bodyX,read_obj
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
+import torch
+
 
 @export
 class Rotor(RigidBody):

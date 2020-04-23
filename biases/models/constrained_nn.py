@@ -3,68 +3,93 @@ import torch.nn as nn
 from torchdiffeq import odeint
 from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import Trivial
-from biases.models.utils import FCtanh, tril_mask, Linear, Reshape
+from biases.models.utils import FCtanh, Linear, Reshape
 from biases.dynamics.hamiltonian import (
     EuclideanT,
     ConstrainedHamiltonianDynamics,
 )
 from biases.systems.rigid_body import rigid_DPhi
 from typing import Optional, Tuple, Union
-from lie_conv.utils import Expression, export, Named
+from lie_conv.utils import export, Named
+import networkx as nx
+import torch.nn.functional as F
 
-class CH(nn.Module,metaclass=Named):  # abstract constrained Hamiltonian network class
-    def __init__(
-        self,
-        G,
+class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian network class
+    def __init__(self,G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
-        wgrad=True,
-        **kwargs
-    ):
+        wgrad=True, **kwargs):
+
         super().__init__(**kwargs)
         if angular_dims != tuple():
             print("CH ignores angular_dims")
-        if q_ndim is not None:
-            print("CH ignores q_ndim")
         self.G = G
         self.nfe = 0
         self.wgrad = wgrad
         self.n_dof = len(G.nodes)
-        # Default set to 2 because each angle is 2 coordinates
-        self.dof_ndim = 2 if dof_ndim is None else dof_ndim
-        self._Minv_net = torch.nn.Parameter(torch.eye(self.n_dof))
-        self.register_buffer("_tril_mask", tril_mask(self._Minv_net))
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+        self.dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=self.wgrad)
+        self._Minv = torch.nn.Parameter(torch.eye(self.n_dof))
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
+        self._moments = torch.nn.Parameter(torch.randn(self.n_dof,self.n_dof))
+        self._masses = torch.nn.Parameter(torch.randn(self.n_dof))
 
     @property
-    def tril_Minv(self):
-        return self._tril_mask * self._Minv_net
+    def M(self):
+        M = torch.zeros_like(self._moments)
+        for ki, _ in nx.get_node_attributes(self.G, "m").items():
+            i = self.G.key2id[ki]
+            M[i, i] += F.softplus(self._masses[i]) # Learned mass
+        for (ki,kj), _ in nx.get_edge_attributes(self.G,"I").items():
+            i,j = self.G.key2id[ki],self.G.key2id[kj]
+            I = F.softplus(self._moments[i,j]) # Learned 2nd moment
+            M[i,i] += I
+            M[i,j] -= I
+            M[j,i] -= I
+            M[j,j] += I
+        return M
 
     @property
     def Minv(self):
-        """Compute the learned inverse mass matrix M^{-1}
+        return torch.inverse(self.M)
+    # @property
+    # def tril_Minv(self):
+    #     res = torch.triu(self._Minv, diagonal=1)
+    #     # Constrain diagonal of Cholesky to be positive
+    #     res = res + torch.diag_embed(
+    #         torch.nn.functional.softplus(torch.diagonal(self._Minv, dim1=-2, dim2=-1)),
+    #         dim1=-2,
+    #         dim2=-1,
+    #     )
+    #     res = res.transpose(-1, -2)  # Make lower triangular
+    #     return res
 
-        Args:
-            q: N x D Tensor representing the position
-        """
-        lower_triangular = self.tril_Minv
-        Minv_mat = lower_triangular @ lower_triangular.T
-        return Minv_mat
+    # @property
+    # def Minv(self):
+    #     """Compute the learned inverse mass matrix M^{-1}
 
-    def M(self, qdot):
-        """Computes the mass matrix times a vector.
-        Note that the input must be in Cartesian coordinates
-        """
-        assert qdot.ndim == 2
-        assert qdot.size(-1) == self.n_dof * self.dof_ndim
-        qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
-        lower_diag = self.tril_Minv
-        M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
-        M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
-        return M_qdot
+    #     Args:
+    #         q: N x D Tensor representing the position
+    #     """
+    #     lower_triangular = self.tril_Minv
+    #     Minv_mat = lower_triangular @ lower_triangular.T
+    #     return Minv_mat
+
+    # def M(self, qdot):
+    #     """Computes the mass matrix times a vector.
+    #     Note that the input must be in Cartesian coordinates
+    #     """
+    #     assert qdot.ndim == 2
+    #     assert qdot.size(-1) == self.n_dof * self.dof_ndim
+    #     qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
+    #     lower_diag = self.tril_Minv
+    #     M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
+    #     M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
+    #     return M_qdot
+
 
     def H(self, t, z):
         """ Compute the Hamiltonian H(t, x, p)
@@ -91,8 +116,7 @@ class CH(nn.Module,metaclass=Named):  # abstract constrained Hamiltonian network
 
     def forward(self, t, z):
         self.nfe += 1
-        dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=self.wgrad)
-        return dynamics(t, z)
+        return self.dynamics(t, z)
 
     def compute_V(self, x):
         raise NotImplementedError
@@ -113,31 +137,27 @@ class CH(nn.Module,metaclass=Named):  # abstract constrained Hamiltonian network
         assert (z0.ndim == 4) and (ts.ndim == 1)
         assert z0.size(-1) == self.dof_ndim
         assert z0.size(-2) == self.n_dof
-        N = z0.size(0)
-        z0 = z0.reshape(N, -1)  # -> N x (2 * n_dof * dof_ndim)
-        x0, xdot0 = z0.chunk(2, dim=-1)
-        p0 = self.M(xdot0)
+        bs = z0.size(0)
+        #z0 = z0.reshape(N, -1)  # -> N x (2 * n_dof * dof_ndim) =: N x D
+        x0, xdot0 = z0.chunk(2, dim=1)
+        p0 = self.M@xdot0
 
-        xp0 = torch.cat([x0, p0], dim=-1)
+        xp0 = torch.stack([x0, p0], dim=1).reshape(bs,-1)
         xpt = odeint(self, xp0, ts, rtol=tol, method="rk4")
-        xpt = xpt.permute(1, 0, 2)  # T x N x D -> N x T x D
+        xpt = xpt.permute(1, 0, 2)  # T x bs x D -> bs x T x D
 
-        xpt = xpt.reshape(N, len(ts), 2, self.n_dof, self.dof_ndim)
+        xpt = xpt.reshape(bs, len(ts), 2, self.n_dof, self.dof_ndim)
         xt, pt = xpt.chunk(2, dim=-3)
         # TODO: make Minv @ pt faster by L(L^T @ pt)
-        vt = self.Minv.matmul(pt)
+        vt = self.Minv@pt  # Minv [n_dof x n_dof]. pt [bs, T, 1, n_dof, dof_ndim]
         xvt = torch.cat([xt, vt], dim=-3)
-
         return xvt
 
 
 @export
 class CHNN(CH):
-    def __init__(
-        self,
-        G,
+    def __init__(self,G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
         hidden_size: int = 200,
         num_layers=3,
@@ -145,20 +165,13 @@ class CHNN(CH):
         **kwargs
     ):
         super().__init__(
-            G=G,
-            dof_ndim=dof_ndim,
-            q_ndim=q_ndim,
-            angular_dims=angular_dims,
-            wgrad=wgrad,
-            **kwargs
+            G=G, dof_ndim=dof_ndim, angular_dims=angular_dims, wgrad=wgrad, **kwargs
         )
         n = len(G.nodes())
         chs = [n * self.dof_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
-            *[
-                FCtanh(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
-                for i in range(num_layers)
-            ],
+            *[FCtanh(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)],
             Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
             Reshape(-1)
         )
@@ -176,47 +189,26 @@ class CHNN(CH):
 
 @export
 class CHLC(CH, LieResNet):
-    # TODO: cleanup
-    def __init__(
-        self,
-        G,
-        d=2,
-        bn=False,
-        num_layers=4,
-        group=Trivial(2),
-        k=384,
-        knn=False,
-        nbhd=100,
-        mean=True,
-        **kwargs
-    ):
-        chin = len(G.nodes())
-        super().__init__(
-            G=G,
-            chin=chin,
-            ds_frac=1,
-            num_layers=num_layers,
-            nbhd=nbhd,
-            mean=mean,
-            bn=bn,
-            xyz_dim=d,
-            group=group,
-            fill=1.0,
-            k=k,
-            num_outputs=1,
-            cache=False,
-            knn=knn,
-            **kwargs
-        )
-        self.nfe = 0
+    def __init__(self,G,
+        dof_ndim: Optional[int] = None,
+        angular_dims: Union[Tuple, bool] = tuple(),
+        hidden_size=200,num_layers=3,wgrad=True,bn=False,
+        group=None,knn=False,nbhd=100,mean=True,**kwargs):
+        n_dof = len(G.nodes())
+        super().__init__(G=G,dof_ndim=dof_ndim,angular_dims=angular_dims,wgrad=wgrad,
+            chin=n_dof,ds_frac=1,num_layers=num_layers,nbhd=nbhd,mean=mean,bn=bn,xyz_dim=dof_ndim,
+            group=group or Trivial(dof_ndim),fill=1.0,k=hidden_size,num_outputs=1,cache=False,knn=knn,**kwargs)
 
     def compute_V(self, x):
         """ Input is a canonical position variable and the system parameters,
-            shapes (bs, n,d) and (bs,n,c)"""
+        Args:
+            x: (N x n_dof x dof_ndim) sized Tensor representing the position in
+            Cartesian coordinates
+        Returns: a length N Tensor representing the potential energy
+        """
+        assert x.ndim == 3
         mask = ~torch.isnan(x[..., 0])
         # features = torch.zeros_like(x[...,:1])
         bs, n, d = x.shape
-        features = 1 * torch.eye(n, device=x.device, dtype=x.dtype)[None].repeat(
-            (bs, 1, 1)
-        )
+        features = torch.eye(n, device=x.device, dtype=x.dtype)[None].repeat((bs, 1, 1))
         return super(CH, self).forward((x, features, mask)).squeeze(-1)

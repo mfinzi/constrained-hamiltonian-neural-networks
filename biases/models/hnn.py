@@ -14,7 +14,6 @@ class HNN(nn.Module, metaclass=Named):
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         hidden_size: int = 200,
         num_layers: int = 3,
         canonical: bool = False,
@@ -24,13 +23,13 @@ class HNN(nn.Module, metaclass=Named):
     ):
         super().__init__(**kwargs)
         self.nfe = 0
-        if dof_ndim is not None:
-            print("HNN ignores dof_ndim")
-        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
-        self.q_ndim = q_ndim
         self.canonical = canonical
 
-        chs = [q_ndim] + num_layers * [hidden_size]
+        self.n_dof = len(G.nodes)
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+
+        chs = [self.q_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
@@ -47,13 +46,14 @@ class HNN(nn.Module, metaclass=Named):
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], q_ndim * q_ndim, zero_bias=True, orthogonal_init=True),
-            Reshape(-1, q_ndim, q_ndim)
+            Linear(
+                chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True
+            ),
+            Reshape(-1, self.q_ndim, self.q_ndim)
         )
-        self.register_buffer("_tril_mask", tril_mask(torch.eye(q_ndim)))
         # Set everything to angular if `angular_dim` is True
         self.angular_dims = (
-            list(range(q_ndim)) if angular_dims is True else angular_dims
+            list(range(self.q_ndim)) if angular_dims is True else angular_dims
         )
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 
@@ -78,6 +78,18 @@ class HNN(nn.Module, metaclass=Named):
         T = GeneralizedT(p, Minv)
         return T + V
 
+    def tril_Minv(self, q):
+        mass_net_q = self.mass_net(q)
+        res = torch.triu(mass_net_q, diagonal=1)
+        # Constrain diagonal of Cholesky to be positive
+        res = res + torch.diag_embed(
+            torch.nn.functional.softplus(torch.diagonal(self._Minv, dim1=-2, dim2=-1)),
+            dim1=-2,
+            dim2=-1,
+        )
+        res = res.transpose(-1, -2)  # Make lower triangular
+        return res
+
     def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
         """Compute the learned inverse mass matrix M^{-1}(q)
 
@@ -85,12 +97,12 @@ class HNN(nn.Module, metaclass=Named):
             q: N x D Tensor representing the position
         """
         assert q.ndim == 2
-        lower_triangular = self._tril_mask * self.mass_net(q)
+        lower_triangular = self.tril_Minv(q)
         assert lower_triangular.ndim == 3
         Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1))
-        Minv = Minv + eps * torch.eye(
-            Minv.size(-1), device=Minv.device, dtype=Minv.dtype
-        )
+        # Minv = Minv + eps * torch.eye(
+        #    Minv.size(-1), device=Minv.device, dtype=Minv.dtype
+        # )
         return Minv
 
     def M(self, q):

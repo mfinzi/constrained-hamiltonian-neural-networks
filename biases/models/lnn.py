@@ -14,7 +14,6 @@ class LNN(nn.Module, metaclass=Named):
         self,
         G,
         dof_ndim: Optional[int] = None,
-        q_ndim: Optional[int] = None,
         hidden_size: int = 200,
         num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
@@ -25,11 +24,12 @@ class LNN(nn.Module, metaclass=Named):
         # Number of function evaluations
         self.nfe = 0
         # Number of degrees of freedom
-        if dof_ndim is not None:
-            print("LNN ignores dof_ndim")
-        q_ndim = q_ndim if q_ndim is not None else len(G.nodes)
-        self.q_ndim = q_ndim
-        chs = [2 * q_ndim] + num_layers * [hidden_size]
+
+        self.n_dof = len(G.nodes)
+        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = self.n_dof * self.dof_ndim
+
+        chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
@@ -41,7 +41,7 @@ class LNN(nn.Module, metaclass=Named):
         print("LNN currently assumes time independent Lagrangian")
         # Set everything to angular if `angular_dim` is True
         self.angular_dims = (
-            tuple(range(q_ndim)) if angular_dims is True else angular_dims
+            tuple(range(self.q_ndim)) if angular_dims is True else angular_dims
         )
         self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
 
