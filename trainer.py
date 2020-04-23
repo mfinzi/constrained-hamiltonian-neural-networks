@@ -188,6 +188,7 @@ if __name__ == "__main__":
 
     print("Saving training logs")
     ax = trainer.logger.scalar_frame.plot()
+    ax.set(yscale="log")
     figure_path = args.exp_dir + "/log.png"
     ax.figure.savefig(figure_path)
 
