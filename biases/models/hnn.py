@@ -95,7 +95,7 @@ class HNN(nn.Module, metaclass=Named):
         """Compute the learned inverse mass matrix M^{-1}(q)
 
         Args:
-            q: N x D Tensor representing the position
+            q: bs x D Tensor representing the position
         """
         assert q.ndim == 2
         lower_triangular = self.tril_Minv(q)
@@ -107,7 +107,7 @@ class HNN(nn.Module, metaclass=Named):
         """Returns a function that multiplies the mass matrix M(q) by a vector qdot
 
         Args:
-            q: N x D Tensor representing the position
+            q: bs x D Tensor representing the position
         """
         assert q.ndim == 2
         lower_triangular = self.tril_Minv(q)
