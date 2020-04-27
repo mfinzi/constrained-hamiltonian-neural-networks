@@ -25,9 +25,9 @@ class HNN(nn.Module, metaclass=Named):
         self.nfe = 0
         self.canonical = canonical
 
-        self.n_dof = len(G.nodes)
-        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
-        self.q_ndim = self.n_dof * self.dof_ndim
+        #self.n_dof = len(G.nodes)
+        #self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = dof_ndim#self.n_dof * self.dof_ndim
 
         chs = [self.q_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
@@ -52,9 +52,10 @@ class HNN(nn.Module, metaclass=Named):
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
         # Set everything to angular if `angular_dim` is True
-        self.angular_dims = (
-            list(range(self.q_ndim)) if angular_dims is True else angular_dims
-        )
+        # self.angular_dims = (
+        #     list(range(self.q_ndim)) if angular_dims is True else angular_dims
+        # )
+        self.angular_dims = angular_dims
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 
     def H(self, t, z):
@@ -143,34 +144,34 @@ class HNN(nn.Module, metaclass=Named):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
 
         Args:
-            z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
+            z0: (N x 2 x D) sized
                 Tensor representing initial state. N is the batch size
             ts: a length T Tensor representing the time points to evaluate at
             tol: integrator tolerance
 
-        Returns: a N x T x 2 x n_dof x d sized Tensor
+        Returns: a N x T x 2 x D sized Tensor
         """
-        assert (z0.ndim == 4) and (ts.ndim == 1)
-        assert z0.size(-1) * z0.size(-2) == self.q_ndim
-        N, _, n_dof, d = z0.size()
-        assert n_dof * d == self.q_ndim
-        z0 = z0.reshape(N, -1)  # -> N x D
+        assert (z0.ndim == 3) and (ts.ndim == 1)
+        assert z0.shape[-1] == self.q_ndim
+        bs, _, D = z0.size()
+        assert D == self.q_ndim
+        z0 = z0.reshape(bs, -1)  # -> bs x D
         if self.canonical:
             q0, p0 = z0.chunk(2, dim=-1)
         else:
             q0, v0 = z0.chunk(2, dim=-1)
-            p0 = self.M(q0)(v0)
+            p0 = self.M(q0)(v0) #(DxD)*(bsxD) -> (bsxD) 
 
         qp0 = torch.cat([q0, p0], dim=-1)
         qpt = odeint(self, qp0, ts, rtol=tol, method="rk4")
         qpt = qpt.permute(1, 0, 2)  # T x N x D -> N x T x D
 
         if self.canonical:
-            qpt = qpt.reshape(N, len(ts), 2, n_dof, d)
+            qpt = qpt.reshape(bs, len(ts), 2, D)
             return qpt
         else:
             qt, pt = qpt.reshape(-1, 2 * self.q_ndim).chunk(2, dim=-1)
             vt = self.Minv(qt).matmul(pt.unsqueeze(-1)).squeeze(-1)
             qvt = torch.cat([qt, vt], dim=-1)
-            qvt = qvt.reshape(N, len(ts), 2, n_dof, d)
+            qvt = qvt.reshape(bs, len(ts), 2, D)
             return qvt

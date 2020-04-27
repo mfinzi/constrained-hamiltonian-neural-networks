@@ -3,6 +3,7 @@ from biases.systems.rigid_body import RigidBody,BodyGraph
 from biases.animation import Animation
 import numpy as np
 from biases.utils import euler2frame,comEuler2bodyX,read_obj
+from biases.utils import comEuler2bodyX, bodyX2comEuler
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
@@ -11,8 +12,10 @@ import torch
 
 @export
 class Rotor(RigidBody):
-    d=3
-    def __init__(self, mass=1,moments=(1,2,3)):
+    d=3 # Cartesian Embedding dimension
+    D=6 #=3 euler + 3 com Total body coordinate dimension 
+    angular_dims = range(3,6)#slice(3,None)
+    def __init__(self, mass=3,moments=(1,2,3)):
         self.body_graph = BodyGraph()
         self.body_graph.add_extended_nd(0,mass,moments,d=3)
     def sample_initial_conditions(self,N):
@@ -21,6 +24,12 @@ class Rotor(RigidBody):
         return bodyX
     def potential(self,x):
         return 0
+    def body2globalCoords(self,comEulers):
+        """ input: (bs,2,6) output: (bs,2,4,3) """
+        return comEuler2bodyX(comEulers)
+    def global2bodyCoords(self,bodyX):
+        """ input: (bs,2,4,3) output: (bs,2,6)"""
+        return bodyX2comEuler(bodyX)
 
     @property
     def animator(self):

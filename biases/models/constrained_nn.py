@@ -14,6 +14,7 @@ from lie_conv.utils import export, Named
 import networkx as nx
 import torch.nn.functional as F
 
+@export
 class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian network class
     def __init__(self,G,
         dof_ndim: Optional[int] = None,
@@ -34,18 +35,19 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
-        self._moments = torch.nn.Parameter(.1*torch.randn(self.n_dof,self.n_dof))
-        self._masses = torch.nn.Parameter(.1*torch.randn(self.n_dof))
-
+        self.moments = torch.nn.Parameter(torch.ones(self.n_dof,self.n_dof))
+        self.masses = torch.nn.Parameter(torch.zeros(self.n_dof))
+        #self.moments = torch.nn.Parameter(torch.zeros(self.dof_ndim,self.n_dof))
     @property
     def M(self):
-        M = torch.zeros_like(self._moments)
+        #return torch.diag(F.softplus(self.masses))
+        M = torch.zeros(self.n_dof,self.n_dof,device=self.masses.device)
         for ki, _ in nx.get_node_attributes(self.G, "m").items():
             i = self.G.key2id[ki]
-            M[i, i] += F.softplus(self._masses[i]) # Learned mass
+            M[i, i] += F.softplus(self.masses[i]) # Learned mass
         for (ki,kj), _ in nx.get_edge_attributes(self.G,"I").items():
             i,j = self.G.key2id[ki],self.G.key2id[kj]
-            I = F.softplus(self._moments[i,j]) # Learned 2nd moment
+            I = F.softplus((self.moments[i,j]+self.moments[j,i])/2) # Learned 2nd moment
             M[i,i] += I
             M[i,j] -= I
             M[j,i] -= I
@@ -54,7 +56,14 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
 
     @property
     def Minv(self):
+        """ assumes p shape (*,n,a) and n is organized, all the same dimension for now"""
+        #ones = torch.ones(self.n_dof,self)
+        #Mi = torch.zeros(self.n_dof,self.n_dof)
+        #return torch.diag(1/F.softplus(self.masses))
         return torch.inverse(self.M)
+    
+    # def log_data(self,logger,step,name):
+    #     print(self.Minv)
     # @property
     # def tril_Minv(self):
     #     res = torch.triu(self._Minv, diagonal=1)
@@ -68,7 +77,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
     #     return res
 
     # @property
-    # def Minv(self):
+    # def M(self):
     #     """Compute the learned inverse mass matrix M^{-1}
 
     #     Args:
@@ -77,18 +86,18 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
     #     lower_triangular = self.tril_Minv
     #     Minv_mat = lower_triangular @ lower_triangular.T
     #     return Minv_mat
-
-    # def M(self, qdot):
+    # @property
+    # def Minv(self):#, qdot):
     #     """Computes the mass matrix times a vector.
     #     Note that the input must be in Cartesian coordinates
     #     """
-    #     assert qdot.ndim == 2
-    #     assert qdot.size(-1) == self.n_dof * self.dof_ndim
-    #     qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
-    #     lower_diag = self.tril_Minv
-    #     M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
-    #     M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
-    #     return M_qdot
+    #     #assert qdot.ndim == 2
+    #     #assert qdot.size(-1) == self.n_dof * self.dof_ndim
+    #     #qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
+    #     #lower_diag = self.tril_Minv
+    #     #M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
+    #     #M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
+    #     return torch.inverse(self.M)#M_qdot
 
 
     def H(self, t, z):
@@ -164,8 +173,7 @@ class CHNN(CH):
         wgrad=True,
         **kwargs
     ):
-        super().__init__(
-            G=G, dof_ndim=dof_ndim, angular_dims=angular_dims, wgrad=wgrad, **kwargs
+        super().__init__(G=G, dof_ndim=dof_ndim, angular_dims=angular_dims, wgrad=wgrad, **kwargs
         )
         n = len(G.nodes())
         chs = [n * self.dof_ndim] + num_layers * [hidden_size]
@@ -185,6 +193,7 @@ class CHNN(CH):
         """
         assert x.ndim == 3
         return self.potential_net(x.reshape(x.size(0), -1))
+
 
 
 @export

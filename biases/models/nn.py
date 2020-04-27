@@ -21,9 +21,9 @@ class NN(nn.Module, metaclass=Named):
         super().__init__(**kwargs)
         if wgrad:
             print("NN ignores wgrad")
-        self.n_dof = len(G.nodes)
-        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
-        self.q_ndim = self.n_dof * self.dof_ndim
+        #self.n_dof = len(G.nodes)
+        #self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = dof_ndim#self.n_dof * self.dof_ndim
 
         chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
@@ -35,17 +35,18 @@ class NN(nn.Module, metaclass=Named):
         )
         print("NN currently assumes time independent ODE")
         self.nfe = 0
-        self.angular_dims = (
-            list(range(self.q_ndim)) if angular_dims is True else angular_dims
-        )
+        # self.angular_dims = (
+        #     list(range(self.q_ndim)) if angular_dims is True else angular_dims
+        # )
+        self.angular_dims = angular_dims
 
     def forward(self, t, z):
         """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
         Args:
             t: Scalar Tensor of the current time
-            z: N x D Tensor of the N different states in D dimensions
+            z: N x 2D Tensor of the N different states in D dimensions
 
-        Returns: N x D Tensor of the time derivatives
+        Returns: N x 2D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
@@ -58,18 +59,18 @@ class NN(nn.Module, metaclass=Named):
         """ Integrates an initial state forward in time according to the learned dynamics
 
         Args:
-            z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
+            z0: (bs x 2 x D) sized
                 Tensor representing initial state. N is the batch size
             ts: a length T Tensor representing the time points to evaluate at
             tol: integrator tolerance
 
-        Returns: a N x T x 2 x n_dof x d sized Tensor
+        Returns: a bs x T x 2 x D sized Tensor
         """
-        assert (z0.ndim == 4) and (ts.ndim == 1)
-        N = z0.shape[0]
-        zt = odeint(self, z0.reshape(N, -1), ts, rtol=tol, method="rk4")
+        assert (z0.ndim == 3) and (ts.ndim == 1)
+        bs = z0.shape[0]
+        zt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
         zt = zt.permute(1, 0, 2)  # T x N x D -> N x T x D
-        return zt.reshape(N, len(ts), *z0.shape[1:])
+        return zt.reshape(bs, len(ts), *z0.shape[1:])
 
 
 @export
@@ -79,16 +80,16 @@ class DeltaNN(NN):
         dynamics using Euler's method with predicted time derivatives
 
         Args:
-            z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
+            z0: (bs x 2 x D) sized
                 Tensor representing initial state. N is the batch size
             ts: a length T Tensor representing the time points to evaluate at
 
-        Returns: a N x T x 2 x n_dof x d sized Tensor
+        Returns: a bs x T x 2 x D sized Tensor
         """
-        assert (z0.ndim == 4) and (ts.ndim == 1)
-        N = z0.shape[0]
+        assert (z0.ndim == 3) and (ts.ndim == 1)
+        bs = z0.shape[0]
         dts = ts[1:] - ts[:-1]
-        zts = [z0.reshape(N, -1)]
+        zts = [z0.reshape(bs, -1)]
         for dt in dts:
             zts.append(zts[-1] + dt * self(ts[0], zts[-1]))
         return torch.stack(zts, dim=1).reshape(N, len(ts), *z0.shape[1:])

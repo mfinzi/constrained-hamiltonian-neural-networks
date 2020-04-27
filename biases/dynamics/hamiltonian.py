@@ -125,3 +125,42 @@ def GeneralizedT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     assert Minv_p.ndim == 2
     T = (p * Minv_p).sum((-1,)) / 2.0
     return T
+
+
+@export
+class ConstrainedLagrangianDynamics(nn.Module):
+    """ Defines the Constrained Hamiltonian dynamics given a Hamiltonian and
+    gradients of constraints.
+
+    Args:
+        H: A callable function that takes in q and p and returns H(q, p)
+        DPhi:
+        wgrad: If True, the dynamics can be backproped.
+    """
+
+    def __init__(
+        self,
+        V,Minv, # And ultimately A
+        DPhi: Callable[[Tensor], Tensor],
+        wgrad: bool = True,
+    ):
+        super().__init__()
+        self.L = L
+        self.DPhi = DPhi
+        self.wgrad = wgrad
+        self.nfe = 0
+
+    def forward(self, t: Tensor, z: Tensor) -> Tensor:
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x D Tensor of the N different states in D dimensions
+        """
+        assert (t.ndim == 0) and (z.ndim == 2)
+        self.nfe += 1
+        with torch.enable_grad():
+            z = torch.zeros_like(z, requires_grad=True) + z
+            P = Proj(self.DPhi(z))
+            H = self.H(t, z).sum()  # elements in mb are independent, gives mb gradients
+            dH = torch.autograd.grad(H, z, create_graph=self.wgrad)[0]  # gradient
+        return P(J(dH.unsqueeze(-1))).squeeze(-1)

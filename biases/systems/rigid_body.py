@@ -14,6 +14,7 @@ class BodyGraph(nx.Graph):
     def __init__(self):
         super().__init__()
         self.key2id = OrderedDict()
+        self.d2ids = 4*[[]]
     def add_node(self,key,*args,**kwargs):
         #print(key,len(self.key2id),self.key2id)
         self.key2id[key]=len(self.key2id)
@@ -29,6 +30,7 @@ class BodyGraph(nx.Graph):
             d=2 is a 2d object (eg plane or disk) with 3dof
             d=3 is a 3d object (eg box,sphere) with 4dof"""
         self.add_node(key,m=m,d=d)
+        self.d2ids[d].extend([self.key2id[key]+i for i in range(d)])
         for i in range(d):
             child_key = f'{key}_{i}'
             self.add_node(child_key)

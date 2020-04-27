@@ -49,9 +49,9 @@ class IntegratedDynamicsTrainer(Trainer):
                 # add conversion from angular to euclidean
                 body = dataloader.dataset.body
                 if angular_to_euclidean:
-                    z0 = body.body2globalCoords(z0.squeeze(-1))
+                    z0 = body.body2globalCoords(z0)
                     flat_pred = body.body2globalCoords(
-                        zt_pred.reshape(bs * Nlong, *rest).squeeze(-1)
+                        zt_pred.reshape(bs * Nlong, *rest)
                     )
                     zt_pred = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
                 zt = dataloader.dataset.body.integrate(z0, long_T)

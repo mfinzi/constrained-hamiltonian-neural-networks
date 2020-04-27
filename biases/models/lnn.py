@@ -25,9 +25,9 @@ class LNN(nn.Module, metaclass=Named):
         self.nfe = 0
         # Number of degrees of freedom
 
-        self.n_dof = len(G.nodes)
-        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
-        self.q_ndim = self.n_dof * self.dof_ndim
+        #self.n_dof = len(G.nodes)
+        #self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.q_ndim = dof_ndim#self.n_dof * self.dof_ndim
 
         chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(
@@ -40,18 +40,19 @@ class LNN(nn.Module, metaclass=Named):
         )
         print("LNN currently assumes time independent Lagrangian")
         # Set everything to angular if `angular_dim` is True
-        self.angular_dims = (
-            tuple(range(self.q_ndim)) if angular_dims is True else angular_dims
-        )
+        #self.angular_dims = (
+        #    tuple(range(self.q_ndim)) if angular_dims is True else angular_dims
+        #)
+        self.angular_dims = angular_dims
         self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
 
     def forward(self, t: Tensor, z: Tensor):
         """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
         Args:
             t: Scalar Tensor of the current time
-            z: N x D Tensor of the N different states in D dimensions
+            z: N x 2D Tensor of the N different states in D dimensions
 
-        Returns: N x D Tensor of the time derivatives
+        Returns: N x 2D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
         ret = self.dynamics(t, z)
@@ -62,7 +63,7 @@ class LNN(nn.Module, metaclass=Named):
         """ Compute the Lagrangian L(t, q, qdot)
         Args:
             t: Scalar Tensor representing time
-            z: N x D Tensor of the N different states in D dimensions.
+            z: N x 2D Tensor of the N different states in 2D dimensions.
                 Assumes that z is [q, qdot]
 
         Returns: Size N Lagrangian Tensor
@@ -84,16 +85,17 @@ class LNN(nn.Module, metaclass=Named):
         Note that self.q_ndim == n_dof x dimensionality of each degree of freedom
 
         Args:
-            z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
+            z0: (N x 2 x D) sized
                 Tensor representing initial state. N is the batch size
             ts: a length T Tensor representing the time points to evaluate at
             tol: integrator tolerance
 
-        Returns: a N x T x 2 x n_dof x d sized Tensor
+        Returns: a N x T x 2 x D sized Tensor
         """
-        assert (z0.ndim == 4) and (ts.ndim == 1)
-        assert z0.size(-1) * z0.size(-2) == self.q_ndim
-        N = z0.shape[0]
-        xvt = odeint(self, z0.reshape(N, -1), ts, rtol=tol, method="rk4")
+        assert (z0.ndim == 3) and (ts.ndim == 1)
+        #assert z0.size(-1) * z0.size(-2) == self.q_ndim
+        assert z0.shape[-1] == self.q_ndim
+        bs = z0.shape[0]
+        xvt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
         xvt = xvt.permute(1, 0, 2)  # T x N x D -> N x T x D
-        return xvt.reshape(N, len(ts), *z0.shape[1:])
+        return xvt.reshape(bs, len(ts), *z0.shape[1:])

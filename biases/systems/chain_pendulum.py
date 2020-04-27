@@ -8,7 +8,7 @@ from biases.animation import Animation
 
 @export
 class ChainPendulum(RigidBody):
-    d=2
+    d=2 # Cartesian Embedding dimension
     def __init__(self, links=2, beams=False, m=1, l=1):
         self.body_graph = BodyGraph()#nx.Graph()
         self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
@@ -25,8 +25,10 @@ class ChainPendulum(RigidBody):
             for i in range(1, links):
                 self.body_graph.add_node(i, m=m)
                 self.body_graph.add_edge(i - 1, i, l=l)
-
+        self.D = links # Total body coordinate dimension: 1 angle per link
+        self.angular_dims = range(links)
     def body2globalCoords(self, angles_omega):
+        print(angles_omega.shape)
         d = 2
         n = len(self.body_graph.nodes)
         N = angles_omega.shape[0]
@@ -76,7 +78,7 @@ class ChainPendulum(RigidBody):
             rel_pos_vel = global_pos_vel[..., j, :] - start_position_velocity
             angles_omega[..., j] += self.cartesian2angle(rel_pos_vel)
             start_position_velocity += rel_pos_vel
-        return angles_omega.unsqueeze(-1)
+        return angles_omega
 
     def sample_initial_conditions(self, N):
         n = len(self.body_graph.nodes)
