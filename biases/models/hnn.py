@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, tril_mask, mod_angles, Linear
+from biases.models.utils import FCsoftplus, Reshape, mod_angles, Linear
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
 from typing import Tuple, Union, Optional
 
@@ -84,14 +84,14 @@ class HNN(nn.Module, metaclass=Named):
         res = torch.triu(mass_net_q, diagonal=1)
         # Constrain diagonal of Cholesky to be positive
         res = res + torch.diag_embed(
-            torch.nn.functional.softplus(torch.diagonal(self._Minv, dim1=-2, dim2=-1)),
+            torch.nn.functional.softplus(torch.diagonal(mass_net_q, dim1=-2, dim2=-1)),
             dim1=-2,
             dim2=-1,
         )
         res = res.transpose(-1, -2)  # Make lower triangular
         return res
 
-    def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
+    def Minv(self, q: Tensor) -> Tensor:
         """Compute the learned inverse mass matrix M^{-1}(q)
 
         Args:
@@ -101,9 +101,6 @@ class HNN(nn.Module, metaclass=Named):
         lower_triangular = self.tril_Minv(q)
         assert lower_triangular.ndim == 3
         Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1))
-        # Minv = Minv + eps * torch.eye(
-        #    Minv.size(-1), device=Minv.device, dtype=Minv.dtype
-        # )
         return Minv
 
     def M(self, q):
@@ -113,16 +110,15 @@ class HNN(nn.Module, metaclass=Named):
             q: N x D Tensor representing the position
         """
         assert q.ndim == 2
-        lower_triangular = self._tril_mask * self.mass_net(q)
+        lower_triangular = self.tril_Minv(q)
         assert lower_triangular.ndim == 3
 
         def M_func(qdot):
             assert qdot.ndim == 2
             qdot = qdot.unsqueeze(-1)
-            # M_times_qdot = torch.cholesky_solve(
-            #    qdot, lower_triangular, upper=False
-            # ).squeeze(-1)
-            M_times_qdot = torch.solve(qdot, self.Minv(q))[0].squeeze(-1)
+            M_times_qdot = torch.cholesky_solve(
+                qdot, lower_triangular, upper=False
+            ).squeeze(-1)
             return M_times_qdot
 
         return M_func
