@@ -5,7 +5,7 @@ from oil.utils.utils import Named, export
 from biases.animation import Animation
 from biases.dynamics.hamiltonian import ConstrainedHamiltonianDynamics, EuclideanT
 import numpy as np
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from scipy.spatial.transform import Rotation
 
 @export
@@ -14,13 +14,13 @@ class BodyGraph(nx.Graph):
     def __init__(self):
         super().__init__()
         self.key2id = OrderedDict()
-        self.d2ids = 4*[[]]
+        self.d2ids = defaultdict(list)#4*[[]]
     def add_node(self,key,*args,**kwargs):
         #print(key,len(self.key2id),self.key2id)
         self.key2id[key]=len(self.key2id)
         super().add_node(key,*args,**kwargs)
 
-    def add_extended_nd(self,key,m,moments,d=3):
+    def add_extended_nd(self,key,m,moments=None,d=3,**kwargs):
         """ Adds an extended body with name key, mass m and vector of principal
             moments representing the eigenvalues of the the 2nd moment matrix
             along principle directions. 
@@ -29,8 +29,8 @@ class BodyGraph(nx.Graph):
             d=1 is a 1d nodesobject (eg beam) with 2dof
             d=2 is a 2d object (eg plane or disk) with 3dof
             d=3 is a 3d object (eg box,sphere) with 4dof"""
-        self.add_node(key,m=m,d=d)
-        self.d2ids[d].extend([self.key2id[key]+i for i in range(d)])
+        self.add_node(key,m=m,d=d,**kwargs)
+        self.d2ids[d].extend([self.key2id[key]+i for i in range(d+1)])
         for i in range(d):
             child_key = f'{key}_{i}'
             self.add_node(child_key)
@@ -92,9 +92,16 @@ class RigidBody(object, metaclass=Named):
         self._m = self._m.to(device, dtype)
         self._minv = self._minv.to(device, dtype)
 
-    def DPhi(self, z):
-        Minv = self.Minv[None].to(device=z.device, dtype=z.dtype)
-        return rigid_DPhi(self.body_graph, Minv, z)
+    def DPhi(self, zp):
+        bs,n,d = zp.shape[0],self.n,self.d
+        x,p = zp.reshape(bs,2,n,d).unbind(dim=1)
+        Minv = self.Minv.to(zp.device,dtype=zp.dtype)
+        v = Minv@p
+        DPhi = rigid_DPhi(self.body_graph, x, v)
+        # Convert d/dv to d/dp
+        DPhi[:,1] = (Minv@DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
+        return DPhi.reshape(bs,2*n*d,-1)
+
 
     # def global2bodyCoords(self,z):
     #     """ inputs [xv (bs,2,n_all,d)]
@@ -244,17 +251,11 @@ def point2tether_constraints(G,x,v):
 #         DPhi[:,0, :, axis, 1,cid] = Minv[:, i]
 #     return DPhi
 
-def rigid_DPhi(rigid_body_graph, Minv, z):
-    """inputs [Graph (n,E)] [z (bs,2nd)] [Minv (bs, n, n)]
+def rigid_DPhi(rigid_body_graph, x, v):
+    """inputs [Graph (n,E)] [x (bs,n,d)] [v (bs, n, d)]
        ouput [DPhi (bs, 2nd, 2C)]"""
-    n = Minv.shape[-1]
-    bs, D = z.shape  # of ODE dims, 2*num_particles*space_dim
-    x = z[:, : D // 2].reshape(bs, n, -1)
-    p = z[:, D // 2 :].reshape(bs, n, -1)
     bs, n, d = x.shape
-    G = rigid_body_graph
-    v = Minv @ p
     constraints = (point2point_constraints,point2tether_constraints,joint_constraints)
-    DPhi = torch.cat([constraint(G,x,v) for constraint in constraints],dim=-1)
-    DPhi[:,1] = (Minv@DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
-    return DPhi.reshape(bs,2*n*d,-1) #(bs,2,n,d,2,C)->#(bs,2nd,2C)
+    DPhi = torch.cat([constraint(rigid_body_graph,x,v) for constraint in constraints],dim=-1)
+    #DPhi[:,1] = (Minv@DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
+    return DPhi#.reshape(bs,2*n*d,-1) #(bs,2,n,d,2,C)->#(bs,2nd,2C)

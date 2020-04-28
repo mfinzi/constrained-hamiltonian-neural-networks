@@ -98,8 +98,8 @@ def EuclideanT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     Note that in Euclidean space, Minv only mixes degrees of freedom, not their individual dimensions
 
     Args:
-        p: N x ndof x D Tensor representing the canonical momentum in Cartesian coordinates
-        Minv: N x ndof x ndof Tensor representing the inverse mass matrix. Can be a
+        p: bs x ndof x D Tensor representing the canonical momentum in Cartesian coordinates
+        Minv: bs x ndof x ndof Tensor representing the inverse mass matrix. Can be a
             callable that computes Minv(p) as well
     """
 
@@ -116,8 +116,8 @@ def GeneralizedT(p: Tensor, Minv: Union[Callable[[Tensor], Tensor]]) -> Tensor:
     Note that in non-Euclidean space, Minv mixes every coordinate
 
     Args:
-        p: N x D Tensor representing the canonical momentum.
-        Minv: N x D x D Tensor representing the inverse mass matrix. Can be a
+        p: bs x D Tensor representing the canonical momentum.
+        Minv: bs x D x D Tensor representing the inverse mass matrix. Can be a
             callable that computes Minv(p) as well
     """
     assert p.ndim == 2
@@ -133,7 +133,7 @@ class ConstrainedLagrangianDynamics(nn.Module):
     gradients of constraints.
 
     Args:
-        H: A callable function that takes in q and p and returns H(q, p)
+        V: A callable function that takes in x and returns the potential
         DPhi:
         wgrad: If True, the dynamics can be backproped.
     """
@@ -142,25 +142,40 @@ class ConstrainedLagrangianDynamics(nn.Module):
         self,
         V,Minv, # And ultimately A
         DPhi: Callable[[Tensor], Tensor],
+        shape,
         wgrad: bool = True,
     ):
         super().__init__()
-        self.L = L
+        self.V = V
+        self.Minv = Minv
         self.DPhi = DPhi
+        self.shape = shape
         self.wgrad = wgrad
         self.nfe = 0
+
 
     def forward(self, t: Tensor, z: Tensor) -> Tensor:
         """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
         Args:
             t: Scalar Tensor of the current time
-            z: N x D Tensor of the N different states in D dimensions
+            z: bs x 2nd Tensor of the bs different states in D=2nd dimensions
         """
         assert (t.ndim == 0) and (z.ndim == 2)
+        bs,n,d = z.shape[0],*self.shape
         self.nfe += 1
         with torch.enable_grad():
-            z = torch.zeros_like(z, requires_grad=True) + z
-            P = Proj(self.DPhi(z))
-            H = self.H(t, z).sum()  # elements in mb are independent, gives mb gradients
-            dH = torch.autograd.grad(H, z, create_graph=self.wgrad)[0]  # gradient
-        return P(J(dH.unsqueeze(-1))).squeeze(-1)
+            x, v = z.reshape(bs,2,n,d).unbind(dim=1) # (bs,n,d)
+            x = torch.zeros_like(x, requires_grad=True) + x
+            dV = torch.autograd.grad(self.V(x).sum(),x,create_graph=self.wgrad)[0]
+            DPhi = self.DPhi(x,v) # (bs,2,n,d,2,C)
+            G = DPhi[:,0,:,:,0,:].reshape(bs,n*d,-1) # (bs,nd,C)
+            Gdot = DPhi[:,0,:,:,1,:].reshape(bs,n*d,-1) # (bs,nd,C)
+            MinvG = self.Minv(G.reshape(bs,n,-1)).reshape(G.shape) # (bs,nd,C)
+            GTMinvG = G.permute(0,2,1)@MinvG # (bs, C, C)
+            f =  self.Minv(dV).reshape(bs,n*d) # (bs,nd)
+            GTf = (G.permute(0,2,1)@f.unsqueeze(-1)).squeeze(-1) # (bs,C)
+            violation = (Gdot.permute(0,2,1)@v.reshape(bs,n*d,1)).squeeze(-1) # (bs,C)
+            lambdas = (MinvG@torch.solve((GTf+violation).unsqueeze(-1),GTMinvG)[0]).squeeze(-1) # (bs,nd)
+            vdot = f - lambdas # (bs,nd)
+            dynamics = torch.cat([v.reshape(bs,n*d),vdot],dim=-1) # (bs,2nd)
+        return dynamics

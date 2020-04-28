@@ -15,6 +15,7 @@ class Rotor(RigidBody):
     d=3 # Cartesian Embedding dimension
     D=6 #=3 euler + 3 com Total body coordinate dimension 
     angular_dims = range(3,6)#slice(3,None)
+    n=4
     def __init__(self, mass=3,moments=(1,2,3)):
         self.body_graph = BodyGraph()
         self.body_graph.add_extended_nd(0,mass,moments,d=3)
@@ -31,9 +32,9 @@ class Rotor(RigidBody):
         """ input: (bs,2,4,3) output: (bs,2,6)"""
         return bodyX2comEuler(bodyX)
 
-    @property
-    def animator(self):
-        return RigidAnimation
+    # @property
+    # def animator(self):
+    #     return RigidAnimation
     def __str__(self):
         return "Rotor"
     def __repr__(self):
@@ -63,9 +64,9 @@ class RigidAnimation(Animation):
             R = (xyz[1:]-xcom[None,:]) # (T,3,3)
             new_vertices = (R@self.vertices).reshape(*xcom.shape,-1)+xcom[:,None]
             x,y,z = new_vertices
-            #self.objects['pts'].set_verts([new_vertices])
+            self.objects['pts'].set_verts([new_vertices])
             self.objects['pts'].remove()
-            self.objects['pts'] = self.ax.plot_trisurf(x, z, self.triangles, y, shade=True, color='white')
+            #self.objects['pts'] = self.ax.plot_trisurf(x, z, self.triangles, y, shade=True, color='white')
             #if d==3: self.objects['pts'][j].set_3d_properties(xyz[-1:,...,2].T.data.numpy())
         #self.fig.canvas.draw()
         return [self.objects['pts']]

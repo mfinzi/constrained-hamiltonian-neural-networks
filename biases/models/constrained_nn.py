@@ -28,10 +28,10 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         self.nfe = 0
         self.wgrad = wgrad
         self.n_dof = len(G.nodes)
-        self.dof_ndim = 1 if dof_ndim is None else dof_ndim
+        self.dof_ndim = dof_ndim
         self.q_ndim = self.n_dof * self.dof_ndim
         self.dynamics = ConstrainedHamiltonianDynamics(self.H, self.DPhi, wgrad=self.wgrad)
-        self._Minv = torch.nn.Parameter(torch.eye(self.n_dof))
+        #self._Minv = torch.nn.Parameter(torch.eye(self.n_dof))
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
@@ -41,7 +41,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
     @property
     def M(self):
         #return torch.diag(F.softplus(self.masses))
-        M = torch.zeros(self.n_dof,self.n_dof,device=self.masses.device)
+        M = torch.zeros(self.n_dof,self.n_dof,device=self.masses.device,dtype=self.masses.dtype)
         for ki, _ in nx.get_node_attributes(self.G, "m").items():
             i = self.G.key2id[ki]
             M[i, i] += F.softplus(self.masses[i]) # Learned mass
@@ -54,13 +54,13 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
             M[j,j] += I
         return M
 
-    @property
-    def Minv(self):
+    #@property
+    def Minv(self,p):
         """ assumes p shape (*,n,a) and n is organized, all the same dimension for now"""
         #ones = torch.ones(self.n_dof,self)
         #Mi = torch.zeros(self.n_dof,self.n_dof)
         #return torch.diag(1/F.softplus(self.masses))
-        return torch.inverse(self.M)
+        return torch.inverse(self.M)[None]@p
     
     # def log_data(self,logger,step,name):
     #     print(self.Minv)
@@ -120,8 +120,14 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         V = self.compute_V(x)
         return T + V
 
-    def DPhi(self, z):
-        return rigid_DPhi(self.G, self.Minv[None], z)
+    def DPhi(self, zp):
+        bs,n,d = zp.shape[0],self.n_dof,self.dof_ndim
+        x,p = zp.reshape(bs,2,n,d).unbind(dim=1)
+        v = self.Minv(p)
+        DPhi = rigid_DPhi(self.G, x, v)
+        # Convert d/dv to d/dp
+        DPhi[:,1] = self.Minv(DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
+        return DPhi.reshape(bs,2*n*d,-1)
 
     def forward(self, t, z):
         self.nfe += 1
@@ -158,7 +164,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         xpt = xpt.reshape(bs, len(ts), 2, self.n_dof, self.dof_ndim)
         xt, pt = xpt.chunk(2, dim=-3)
         # TODO: make Minv @ pt faster by L(L^T @ pt)
-        vt = self.Minv@pt  # Minv [n_dof x n_dof]. pt [bs, T, 1, n_dof, dof_ndim]
+        vt = self.Minv(pt)  # Minv [n_dof x n_dof]. pt [bs, T, 1, n_dof, dof_ndim]
         xvt = torch.cat([xt, vt], dim=-3)
         return xvt
 

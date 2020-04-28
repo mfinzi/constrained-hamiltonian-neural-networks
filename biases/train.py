@@ -4,11 +4,11 @@ from oil.datasetup.datasets import split_dataset
 from oil.tuning.study import train_trial
 import torch
 from torch.utils.data import DataLoader
-from torch.optim import Adam
+from torch.optim import Adam,AdamW
 from oil.utils.utils import LoaderTo, islice, FixedNumpySeed, cosLr
 from biases.systems.chain_pendulum import ChainPendulum
 import biases.datasets as datasets
-from biases.models import HNN,LNN,NN,CHNN,CHLC,CH
+from biases.models import HNN,LNN,NN,CHNN,CHLC,CH,CL
 from biases.datasets import RigidBodyDataset
 from biases.dynamics_trainer import IntegratedDynamicsTrainer
 import biases.models as models
@@ -20,9 +20,10 @@ import pickle
 def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
         dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,dt=0.1,
         dtype=torch.float32,device=torch.device("cuda"),
-        bs=200,num_epochs=100,trainer_config={}):
+        bs=200,num_epochs=100,trainer_config={},
+        opt_cfg={'weight_decay':1e-5}):
     # Create Training set and model
-    angular = not issubclass(network,CH)
+    angular = not issubclass(network,(CH,CL))
     splits = {"train": n_train,"test": 200}
     with FixedNumpySeed(0):
         dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=body,
@@ -40,7 +41,7 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
                 device=device,dtype=dtype) for k, v in datasets.items()}
     dataloaders["Train"] = dataloaders["train"]
     # Initialize optimizer and learning rate schedule
-    opt_constr = lambda params: Adam(params, lr=lr)
+    opt_constr = lambda params: AdamW(params, lr=lr,**opt_cfg)
     lr_sched = cosLr(num_epochs)
     return IntegratedDynamicsTrainer(model,dataloaders,opt_constr,lr_sched,
                             log_args={"timeFrac": 1 / 4, "minPeriod": 0.0},**trainer_config)
@@ -56,7 +57,7 @@ if __name__ == "__main__":
         cfg.pop('local_rank')
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
-        rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],CH))
+        rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
         fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
         with open(fname,'wb') as f:
             pickle.dump(rollouts,f)
