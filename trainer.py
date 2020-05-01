@@ -5,7 +5,7 @@ from torch.optim import Adam
 from oil.utils.utils import LoaderTo, FixedNumpySeed, cosLr
 from biases.datasets import RigidBodyDataset
 from biases.dynamics_trainer import IntegratedDynamicsTrainer
-from biases.models.constrained_nn import CHNN, CHLC
+from biases.models.constrained_hnn import CHNN, CHLC
 from biases.models.hnn import HNN
 from biases.models.lnn import LNN
 from biases.models.nn import NN, DeltaNN
