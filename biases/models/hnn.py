@@ -17,7 +17,7 @@ class HNN(nn.Module, metaclass=Named):
         hidden_size: int = 200,
         num_layers: int = 3,
         canonical: bool = False,
-        angular_dims: Union[Tuple, bool] = tuple(),
+        angular_dims: Tuple = tuple(),
         wgrad: bool = True,
         **kwargs
     ):
@@ -49,10 +49,6 @@ class HNN(nn.Module, metaclass=Named):
             ),
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
-        # Set everything to angular if `angular_dim` is True
-        # self.angular_dims = (
-        #     list(range(self.q_ndim)) if angular_dims is True else angular_dims
-        # )
         self.angular_dims = angular_dims
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 

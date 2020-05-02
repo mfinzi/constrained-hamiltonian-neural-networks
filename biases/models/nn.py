@@ -14,7 +14,7 @@ class NN(nn.Module, metaclass=Named):
         dof_ndim: int = 1,
         hidden_size: int = 200,
         num_layers: int = 3,
-        angular_dims: Union[Tuple, bool] = tuple(),
+        angular_dims: Tuple = tuple(),
         wgrad: bool = True,
         **kwargs
     ):
@@ -33,9 +33,6 @@ class NN(nn.Module, metaclass=Named):
         )
         print("NN currently assumes time independent ODE")
         self.nfe = 0
-        # self.angular_dims = (
-        #     list(range(self.q_ndim)) if angular_dims is True else angular_dims
-        # )
         self.angular_dims = angular_dims
 
     def forward(self, t, z):

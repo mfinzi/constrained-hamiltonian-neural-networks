@@ -16,7 +16,7 @@ class LNN(nn.Module, metaclass=Named):
         dof_ndim: int = 1,
         hidden_size: int = 200,
         num_layers: int = 3,
-        angular_dims: Union[Tuple, bool] = tuple(),
+        angular_dims: Tuple = tuple(),
         wgrad: bool = True,
         **kwargs
     ):
@@ -36,10 +36,6 @@ class LNN(nn.Module, metaclass=Named):
             Reshape(-1)
         )
         print("LNN currently assumes time independent Lagrangian")
-        # Set everything to angular if `angular_dim` is True
-        #self.angular_dims = (
-        #    tuple(range(self.q_ndim)) if angular_dims is True else angular_dims
-        #)
         self.angular_dims = angular_dims
         self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
 
