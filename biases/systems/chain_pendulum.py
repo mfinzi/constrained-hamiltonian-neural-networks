@@ -13,7 +13,7 @@ class ChainPendulum(RigidBody):
         self.body_graph = BodyGraph()#nx.Graph()
         self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
         assert not beams, "beams temporarily not supported"
-        self.body_graph.add_extended_nd(0, m=m, d=0,tether=torch.zeros(2),l=l)
+        self.body_graph.add_extended_nd(0, m=m, d=0,tether=(torch.zeros(2),l))
         for i in range(1, links):
             self.body_graph.add_extended_nd(i, m=m, d=0)
             self.body_graph.add_edge(i - 1, i, l=l)
@@ -26,8 +26,8 @@ class ChainPendulum(RigidBody):
         N = angles_omega.shape[0]
         pvs = torch.zeros(N, 2, n, d)
         global_position_velocity = torch.zeros(N, 2, d)
-        length = self.body_graph.nodes[0]["l"]
-        global_position_velocity[:, 0, :] = self.body_graph.nodes[0]["tether"][None]
+        length = self.body_graph.nodes[0]["tether"][1]
+        global_position_velocity[:, 0, :] = self.body_graph.nodes[0]["tether"][0][None]
         global_position_velocity += self.joint2cartesian(length, angles_omega[..., 0])
         pvs[:, :, 0] = global_position_velocity
         for (_, j), length in nx.get_edge_attributes(self.body_graph, "l").items():
@@ -62,7 +62,7 @@ class ChainPendulum(RigidBody):
             *bsT2, n, device=global_pos_vel.device, dtype=global_pos_vel.dtype
         )
         start_position_velocity = torch.zeros(*bsT2, d)
-        start_position_velocity[..., 0, :] = self.body_graph.nodes[0]["tether"][None]
+        start_position_velocity[..., 0, :] = self.body_graph.nodes[0]["tether"][0][None]
         rel_pos_vel = global_pos_vel[..., 0, :] - start_position_velocity
         angles_omega[..., 0] += self.cartesian2angle(rel_pos_vel)
         start_position_velocity += rel_pos_vel
@@ -70,7 +70,7 @@ class ChainPendulum(RigidBody):
             rel_pos_vel = global_pos_vel[..., j, :] - start_position_velocity
             angles_omega[..., j] += self.cartesian2angle(rel_pos_vel)
             start_position_velocity += rel_pos_vel
-        return angles_omega.unsqueeze(-1)
+        return angles_omega
 
     def sample_initial_conditions(self, N):
         n = len(self.body_graph.nodes)
@@ -127,7 +127,7 @@ class PendulumAnimation(Animation):
             torch.stack(
                 [loc.to(self.qt.device, self.qt.dtype), self.qt[i, k, :]], dim=1
             )
-            for k, loc in nx.get_node_attributes(self.G, "tether").items()
+            for k, (loc,_) in nx.get_node_attributes(self.G, "tether").items()
         ]
         for beam, line in zip(beams, self.objects["beams"]):
             line.set_data(*beam[:2])
