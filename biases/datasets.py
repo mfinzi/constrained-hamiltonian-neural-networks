@@ -40,6 +40,7 @@ class RigidBodyDataset(Dataset, metaclass=Named):
             os.makedirs(root_dir, exist_ok=True)
             torch.save((ts, zs), filename)
         self.Ts, self.Zs = self.chunk_training_data(ts, zs, chunk_len)
+        self.Zs = self.Zs.float()
 
         if angular_coords:
             N, T = self.Zs.shape[:2]
