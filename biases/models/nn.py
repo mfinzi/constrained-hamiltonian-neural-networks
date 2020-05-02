@@ -3,7 +3,7 @@ import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
 from biases.models.utils import FCsoftplus, mod_angles, Linear
-from typing import Tuple, Union, Optional
+from typing import Tuple, Union
 
 
 @export
@@ -11,7 +11,7 @@ class NN(nn.Module, metaclass=Named):
     def __init__(
         self,
         G,
-        dof_ndim: Optional[int] = None,
+        dof_ndim: int = 1,
         hidden_size: int = 200,
         num_layers: int = 3,
         angular_dims: Union[Tuple, bool] = tuple(),
@@ -21,9 +21,7 @@ class NN(nn.Module, metaclass=Named):
         super().__init__(**kwargs)
         if wgrad:
             print("NN ignores wgrad")
-        #self.n_dof = len(G.nodes)
-        #self.dof_ndim = 1 if dof_ndim is None else dof_ndim
-        self.q_ndim = dof_ndim#self.n_dof * self.dof_ndim
+        self.q_ndim = dof_ndim
 
         chs = [2 * self.q_ndim] + num_layers * [hidden_size]
         self.net = nn.Sequential(

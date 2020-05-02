@@ -5,7 +5,7 @@ from torchdiffeq import odeint
 from oil.utils.utils import export, Named
 from biases.models.utils import FCsoftplus, Reshape, mod_angles, Linear
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
-from typing import Tuple, Union, Optional
+from typing import Tuple, Union
 
 
 @export
@@ -13,7 +13,7 @@ class HNN(nn.Module, metaclass=Named):
     def __init__(
         self,
         G,
-        dof_ndim: Optional[int] = None,
+        dof_ndim: int = 1,
         hidden_size: int = 200,
         num_layers: int = 3,
         canonical: bool = False,
@@ -25,9 +25,7 @@ class HNN(nn.Module, metaclass=Named):
         self.nfe = 0
         self.canonical = canonical
 
-        #self.n_dof = len(G.nodes)
-        #self.dof_ndim = 1 if dof_ndim is None else dof_ndim
-        self.q_ndim = dof_ndim#self.n_dof * self.dof_ndim
+        self.q_ndim = dof_ndim
 
         chs = [self.q_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
@@ -156,7 +154,7 @@ class HNN(nn.Module, metaclass=Named):
             q0, p0 = z0.chunk(2, dim=-1)
         else:
             q0, v0 = z0.chunk(2, dim=-1)
-            p0 = self.M(q0)(v0) #(DxD)*(bsxD) -> (bsxD) 
+            p0 = self.M(q0)(v0) #(DxD)*(bsxD) -> (bsxD)
 
         qp0 = torch.cat([q0, p0], dim=-1)
         qpt = odeint(self, qp0, ts, rtol=tol, method="rk4")
