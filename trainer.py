@@ -146,11 +146,12 @@ if __name__ == "__main__":
         "HNN",
     ]  # TODO: try NN in euclidean
 
-    dof_ndim = 2 if euclidean_coords else 1  # 2 because we are only doing pendulums for now
+    dof_ndim = body.d if euclidean_coords else body.D
+    angular_dims = body.angular_dims
 
     net_cfg = {
         "dof_ndim": dof_ndim,
-        "angular_dims": tuple() if euclidean_coords else tuple(range(dof_ndim)),
+        "angular_dims": angular_dims,
         "hidden_size": args.hidden_size,
         "num_layers": args.num_layers,
         "wgrad": True,
