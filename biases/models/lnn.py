@@ -89,6 +89,7 @@ class LNN(nn.Module, metaclass=Named):
         #assert z0.size(-1) * z0.size(-2) == self.q_ndim
         assert z0.shape[-1] == self.q_ndim
         bs = z0.shape[0]
+        self.nfe = 0
         xvt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
         xvt = xvt.permute(1, 0, 2)  # T x N x D -> N x T x D
         return xvt.reshape(bs, len(ts), *z0.shape[1:])

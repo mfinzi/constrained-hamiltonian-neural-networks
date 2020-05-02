@@ -80,6 +80,7 @@ class CL(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         Returns: a bs,T,2,n,d sized Tensor
         """
         bs = z0.shape[0]
+        self.nfe = 0
         zt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method="rk4").permute(1, 0, 2)
         return zt.reshape(bs, len(ts), 2, self.n_dof, self.dof_ndim)
         

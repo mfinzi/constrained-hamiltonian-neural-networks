@@ -45,6 +45,7 @@ class NN(nn.Module, metaclass=Named):
         """
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
+        self.nfe += 1
         q, qdot = z.chunk(2, dim=-1)
         q_mod = mod_angles(q, self.angular_dims)
         z_mod = torch.cat([q_mod, qdot], dim=-1)
@@ -63,6 +64,7 @@ class NN(nn.Module, metaclass=Named):
         """
         assert (z0.ndim == 3) and (ts.ndim == 1)
         bs = z0.shape[0]
+        self.nfe = 0
         zt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
         zt = zt.permute(1, 0, 2)  # T x N x D -> N x T x D
         return zt.reshape(bs, len(ts), *z0.shape[1:])

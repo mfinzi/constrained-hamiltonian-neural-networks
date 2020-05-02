@@ -152,6 +152,7 @@ class HNN(nn.Module, metaclass=Named):
             q0, v0 = z0.chunk(2, dim=-1)
             p0 = self.M(q0)(v0) #(DxD)*(bsxD) -> (bsxD)
 
+        self.nfe = 0  # reset each forward pass
         qp0 = torch.cat([q0, p0], dim=-1)
         qpt = odeint(self, qp0, ts, rtol=tol, method="rk4")
         qpt = qpt.permute(1, 0, 2)  # T x N x D -> N x T x D

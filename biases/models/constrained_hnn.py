@@ -157,6 +157,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         x0, xdot0 = z0.chunk(2, dim=1)
         p0 = self.M@xdot0
 
+        self.nfe = 0
         xp0 = torch.stack([x0, p0], dim=1).reshape(bs,-1)
         xpt = odeint(self, xp0, ts, rtol=tol, method="rk4")
         xpt = xpt.permute(1, 0, 2)  # T x bs x D -> bs x T x D
