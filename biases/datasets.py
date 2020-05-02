@@ -45,7 +45,7 @@ class RigidBodyDataset(Dataset, metaclass=Named):
             N, T = self.Zs.shape[:2]
             flat_Zs = self.Zs.reshape(N * T, *self.Zs.shape[2:])
             self.Zs = self.body.global2bodyCoords(flat_Zs.double())
-            print(rel_err(self.body.body2globalCoords(self.Zs.squeeze(-1)), flat_Zs))
+            print(rel_err(self.body.body2globalCoords(self.Zs), flat_Zs))
             self.Zs = self.Zs.reshape(N, T, *self.Zs.shape[1:]).float()
 
     def __len__(self):
