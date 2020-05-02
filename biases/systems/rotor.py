@@ -1,5 +1,5 @@
 from oil.utils.utils import export
-from biases.systems.rigid_body import RigidBody,BodyGraph
+from biases.systems.rigid_body import RigidBody,BodyGraph,project_onto_constraints
 from biases.animation import Animation
 import numpy as np
 from biases.utils import euler2frame,comEuler2bodyX,read_obj
@@ -22,7 +22,10 @@ class Rotor(RigidBody):
     def sample_initial_conditions(self,N):
         comEulers = torch.randn(N,2,6)
         bodyX = comEuler2bodyX(comEulers)
+        #bodyX = torch.randn(N,2,4,3) + torch.randn(N,1,1,1)
+        bodyX = project_onto_constraints(self.body_graph,bodyX)
         return bodyX
+        #return 
     def potential(self,x):
         return 0
     def body2globalCoords(self,comEulers):
