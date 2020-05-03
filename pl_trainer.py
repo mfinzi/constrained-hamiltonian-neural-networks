@@ -52,10 +52,12 @@ class DynamicsModel(pl.LightningModule):
         n_train: int,
         n_val: int,
         n_test: int,
-        network_class,
+        network_class: str,
+        optimizer_class: str,
         regen: bool,
         seed: int,
         tol: float,
+        weight_decay: float,
         **unused_kwargs,
     ):
         super().__init__()
@@ -97,6 +99,7 @@ class DynamicsModel(pl.LightningModule):
 
         self.hparams = hparams
         self.model = model
+        self.body = body
         self.datasets = datasets
         self.splits = splits
         self.batch_sizes = {k: min(batch_size, v) for k, v in splits.items()}
@@ -152,11 +155,9 @@ class DynamicsModel(pl.LightningModule):
 
         batch_trajectory_time = (ts[-1] - ts[0]).item()
         dt = (ts[1] - ts[0]).item()
-        self.double()
         pred_zts, true_zts, _, rel_error, abs_error = self.compare_rollouts(
-            z0.double(), 50 * batch_trajectory_time, dt, self.hparams["tol"]
+            z0, 50 * batch_trajectory_time, dt, self.hparams["tol"]
         )
-        self.float()
         return {
             "trajectory_mse": loss.detach(),
             "rel_error": rel_error.detach(),
@@ -188,15 +189,19 @@ class DynamicsModel(pl.LightningModule):
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
     ):
         # Ground truth is in double so we convert model to double
-        z0 = z0.double()
+        prev_device = list(self.parameters())[0].device
+        prev_dtype = list(self.parameters())[0].dtype
+        self.double()
+        self.cpu()
+        z0 = z0.double().cpu()
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
         pred_zts = self.rollout(z0, ts, tol)
 
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
         if not self.hparams["euclidean"]:  # convert to euclidean for body to integrate
-            z0 = body.body2globalCoords(z0)
-            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest))
+            z0 = body.body2globalCoords(z0).to(z0.device)
+            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest)).to(z0.device)
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
         # (bs, n_steps, 2, n_dof, d)
@@ -213,11 +218,15 @@ class DynamicsModel(pl.LightningModule):
         abs_error = sq_diff_from_true.sqrt()
 
         # TODO: compute error from pert
+        self.to(prev_device)
+        self.to(prev_dtype)
         return pred_zts, true_zts, true_zts_pert, rel_error, abs_error
 
     def configure_optimizers(self):
         return getattr(torch.optim, self.hparams["optimizer_class"])(
-            self.parameters(), lr=self.hparams["lr"]
+            self.parameters(),
+            lr=self.hparams["lr"],
+            weight_decay=self.hparams["weight_decay"],
         )
 
     def train_dataloader(self):
@@ -257,9 +266,9 @@ def parse_cmdline():
     parser.add_argument(
         "--body-args",
         help="Arguments to initialize physical system separated by spaces",
-        nargs="+",
+        nargs="*",
         type=int,
-        required=True,
+        default=[]
     )
     parser.add_argument(
         "--chunk-len",
@@ -282,7 +291,7 @@ def parse_cmdline():
     parser.add_argument(
         "--exp-dir",
         type=str,
-        default="./",
+        default="",
         help="Directory to save files from this experiment",
     )
     parser.add_argument(
@@ -311,7 +320,7 @@ def parse_cmdline():
         "--network-class",
         type=str,
         help="Dynamics network",
-        choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CHLC"],
+        choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
     )
     parser.add_argument(
         "--n-epochs", type=int, default=300, help="Number of training epochs"
@@ -338,12 +347,19 @@ def parse_cmdline():
         default=False,
         help="Forcibly regenerate training data",
     )
+    parser.add_argument(
+        "--weight-decay", type=float, default=0., help="Weight decay",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     from biases.systems.chain_pendulum import ChainPendulum
+    from biases.systems.rotor import Rotor
+    from biases.systems.magnet_pendulum import MagnetPendulum
+    from biases.systems.gyroscope import Gyroscope
     from biases.models.constrained_hnn import CHNN, CHLC
+    from biases.models.constrained_lnn import CLNN, CLLC
     from biases.models.hnn import HNN
     from biases.models.lnn import LNN
     from biases.models.nn import NN, DeltaNN
@@ -354,24 +370,36 @@ if __name__ == "__main__":
     args = parse_cmdline()
     args_dict = dict(vars(args))  # convert to dict with new copy
 
-    if not os.path.exists(args.exp_dir):
-        os.makedirs(args.exp_dir)
-        print("Directory ", args.exp_dir, " Created ")
-    else:
-        print("Directory ", args.exp_dir, " already exists")
+    dynamics_model = DynamicsModel(hparams=args_dict, **args_dict)
 
-    with open(args.exp_dir + "/args.csv", "w") as csvfile:
+    if args.exp_dir == "":
+        exp_dir = "/".join(
+            [
+                ".",
+                "experiments",
+                f"{dynamics_model.body.__repr__()}",
+                f"{args.network_class}",
+            ]
+        )
+    else:
+        exp_dir = args.exp_dir
+
+    if not os.path.exists(exp_dir):
+        os.makedirs(exp_dir)
+        print("Directory ", exp_dir, " Created ")
+    else:
+        print("Directory ", exp_dir, " already exists")
+
+    with open(exp_dir + "/args.csv", "w") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=args_dict.keys())
         writer.writeheader()
         writer.writerow(args_dict)
 
-    dynamics_model = DynamicsModel(hparams=args_dict, **args_dict)
-
-    logger = WandbLogger(save_dir=args.exp_dir, name="test-run", project="pl_wandb")
+    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns")
 
     trainer = Trainer(
         check_val_every_n_epoch=args.n_epochs_per_val,
-        default_root_dir=args.exp_dir,
+        default_root_dir=exp_dir,
         fast_dev_run=args.debug,
         gpus=args.n_gpus,
         logger=logger,
