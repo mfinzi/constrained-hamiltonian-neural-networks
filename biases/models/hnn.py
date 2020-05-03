@@ -87,7 +87,7 @@ class HNN(nn.Module, metaclass=Named):
         res = res.transpose(-1, -2)  # Make lower triangular
         return res
 
-    def Minv(self, q: Tensor) -> Tensor:
+    def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
         """Compute the learned inverse mass matrix M^{-1}(q)
 
         Args:
@@ -96,10 +96,11 @@ class HNN(nn.Module, metaclass=Named):
         assert q.ndim == 2
         lower_triangular = self.tril_Minv(q)
         assert lower_triangular.ndim == 3
-        Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1))
+        diag_noise = eps * torch.eye(lower_triangular.size(-1), dtype=q.dtype, device=q.device)
+        Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1)) + diag_noise
         return Minv
 
-    def M(self, q):
+    def M(self, q, eps=1e-1):
         """Returns a function that multiplies the mass matrix M(q) by a vector qdot
 
         Args:
@@ -112,9 +113,11 @@ class HNN(nn.Module, metaclass=Named):
         def M_func(qdot):
             assert qdot.ndim == 2
             qdot = qdot.unsqueeze(-1)
-            M_times_qdot = torch.cholesky_solve(
-                qdot, lower_triangular, upper=False
-            ).squeeze(-1)
+            diag_noise = eps * torch.eye(lower_triangular.size(-1), dtype=qdot.dtype, device=qdot.device)
+            M_times_qdot = torch.solve(
+                    qdot,
+                    lower_triangular @ lower_triangular.transpose(-2, -1) + diag_noise
+            ).solution.squeeze(-1)
             return M_times_qdot
 
         return M_func
