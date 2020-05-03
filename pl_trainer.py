@@ -47,6 +47,8 @@ class DynamicsModel(pl.LightningModule):
         dt: float,
         integration_time: float,
         lr: float,
+        no_lr_sched: bool,
+        n_epochs: int,
         n_hidden: int,
         n_layers: int,
         n_train: int,
@@ -223,11 +225,20 @@ class DynamicsModel(pl.LightningModule):
         return pred_zts, true_zts, true_zts_pert, rel_error, abs_error
 
     def configure_optimizers(self):
-        return getattr(torch.optim, self.hparams["optimizer_class"])(
+        optimizer = getattr(torch.optim, self.hparams["optimizer_class"])(
             self.parameters(),
             lr=self.hparams["lr"],
             weight_decay=self.hparams["weight_decay"],
         )
+        if self.hparams["no_lr_sched"]:
+            return optimizer
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.hparams["n_epochs"],
+                eta_min=0.,
+            )
+            return [optimizer], [scheduler]
 
     def train_dataloader(self):
         return DataLoader(
@@ -269,6 +280,12 @@ def parse_cmdline():
         nargs="*",
         type=int,
         default=[]
+    )
+    parser.add_argument(
+        "--no-lr-sched",
+        action="store_true",
+        default=False,
+        help="Turn off cosine annealing for learing rate",
     )
     parser.add_argument(
         "--chunk-len",
