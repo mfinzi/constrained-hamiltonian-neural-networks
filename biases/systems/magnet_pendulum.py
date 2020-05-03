@@ -9,6 +9,7 @@ from biases.utils import bodyX2comEuler,comEuler2bodyX, frame2euler,euler2frame
 @export
 class MagnetPendulum(RigidBody):
     d=3
+    n=1
     def __init__(self, mass=1, l=1, q=.05, magnets=5):
         self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()
