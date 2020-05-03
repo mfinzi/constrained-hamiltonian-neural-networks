@@ -131,9 +131,9 @@ class HNN(nn.Module, metaclass=Named):
         Returns: N x D Tensor of the time derivatives
         """
         assert (t.ndim == 0) and (z.ndim == 2)
-        ret = self.dynamics(t, z)
+        dz_dt = self.dynamics(t, z)
         self.nfe += 1
-        return ret
+        return dz_dt
 
     def integrate(self, z0, ts, tol=1e-4):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
