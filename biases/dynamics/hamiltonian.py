@@ -32,6 +32,8 @@ class HamiltonianDynamics(nn.Module):
             z = torch.zeros_like(z, requires_grad=True) + z
             H = self.H(t, z).sum()  # elements in mb are independent, gives mb gradients
             dH = torch.autograd.grad(H, z, create_graph=self.wgrad)[0]  # gradient
+            if torch.isnan(dH).any():
+                raise RuntimeError("NaNs in dH")
         return J(dH.unsqueeze(-1)).squeeze(-1)
 
 
