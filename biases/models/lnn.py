@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, mod_angles, Linear
+from biases.models.utils import FCsoftplus, Reshape, Linear, CosSin
 from biases.dynamics.lagrangian import LagrangianDynamics
 from typing import Tuple, Union
 
@@ -26,8 +26,10 @@ class LNN(nn.Module, metaclass=Named):
 
         self.q_ndim = dof_ndim
 
-        chs = [2 * self.q_ndim] + num_layers * [hidden_size]
+        # We parameterize angular dims in terms of cos(theta), sin(theta)
+        chs = [2 * self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
         self.net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=False),
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
@@ -64,13 +66,11 @@ class LNN(nn.Module, metaclass=Named):
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
         q, qdot = z.chunk(2, dim=-1)
-        q_mod = mod_angles(q, self.angular_dims)
-        z_mod = torch.cat([q_mod, qdot], dim=-1)
         # Add regularization to prevent singular mass matrix at initialization
         # equivalent to adding eps to the diagonal of the mass matrix (Hessian of L)
         # Note that the network could learn to offset this added term
         reg = eps * (qdot * qdot).sum(-1)
-        return self.net(z_mod) + reg
+        return self.net(z) + reg
 
     def integrate(self, z0: Tensor, ts: Tensor, tol=1e-4) -> Tensor:
         """ Integrates an initial state forward in time according to the learned Lagrangian dynamics

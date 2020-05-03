@@ -33,6 +33,35 @@ class Reshape(nn.Module):
     def forward(self, x):
         return x.view(self.shape)
 
+class CosSin(nn.Module):
+    def __init__(self, q_ndim, angular_dims, only_q=True):
+        super(CosSin, self).__init__()
+        self.q_ndim = q_ndim
+        self.angular_dims = tuple(angular_dims)
+        self.non_angular_dims = tuple(set(range(q_ndim)) - set(angular_dims))
+        self.only_q = only_q
+
+    def forward(self, q_or_qother):
+        if self.only_q:
+            q = q_or_qother
+        else:
+            q, other = q_or_qother.chunk(2, dim=-1)
+        assert q.size(-1) == self.q_ndim
+
+
+        q_angular = q[..., self.angular_dims]
+        q_not_angular = q[..., self.non_angular_dims]
+
+        cos_ang_q, sin_ang_q = torch.cos(q_angular), torch.sin(q_angular)
+        q = torch.cat([cos_ang_q, sin_ang_q, q_not_angular], dim=-1)
+
+        if self.only_q:
+            q_or_other = q
+        else:
+            q_or_other = torch.cat([q, other], dim=-1)
+
+        return q_or_other
+
 
 def tril_mask(square_mat):
     n = square_mat.size(-1)

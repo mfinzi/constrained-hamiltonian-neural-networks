@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, mod_angles, Linear
+from biases.models.utils import FCsoftplus, Linear, CosSin
 from typing import Tuple, Union
 
 
@@ -23,8 +23,10 @@ class NN(nn.Module, metaclass=Named):
             print("NN ignores wgrad")
         self.q_ndim = dof_ndim
 
-        chs = [2 * self.q_ndim] + num_layers * [hidden_size]
+        # We parameterize angular dims in terms of cos(theta), sin(theta)
+        chs = [2 * self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
         self.net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=False),
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
@@ -46,10 +48,7 @@ class NN(nn.Module, metaclass=Named):
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
         self.nfe += 1
-        q, qdot = z.chunk(2, dim=-1)
-        q_mod = mod_angles(q, self.angular_dims)
-        z_mod = torch.cat([q_mod, qdot], dim=-1)
-        return self.net(z_mod)
+        return self.net(z)
 
     def integrate(self, z0, ts, tol=1e-4):
         """ Integrates an initial state forward in time according to the learned dynamics

@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, mod_angles, Linear
+from biases.models.utils import FCsoftplus, Reshape, Linear, CosSin
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
 from typing import Tuple, Union
 
@@ -26,9 +26,12 @@ class HNN(nn.Module, metaclass=Named):
         self.canonical = canonical
 
         self.q_ndim = dof_ndim
+        self.angular_dims = angular_dims
 
-        chs = [self.q_ndim] + num_layers * [hidden_size]
+        # We parameterize angular dims in terms of cos(theta), sin(theta)
+        chs = [self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=True),
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
@@ -40,6 +43,7 @@ class HNN(nn.Module, metaclass=Named):
         print("HNN currently assumes time independent Hamiltonian")
 
         self.mass_net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=True),
             *[
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
@@ -49,7 +53,6 @@ class HNN(nn.Module, metaclass=Named):
             ),
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
-        self.angular_dims = angular_dims
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
 
     def H(self, t, z):
@@ -64,11 +67,10 @@ class HNN(nn.Module, metaclass=Named):
         assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.q_ndim
         q, p = z.chunk(2, dim=-1)
-        q_mod = mod_angles(q, self.angular_dims)
 
-        V = self.potential_net(q_mod)
+        V = self.potential_net(q)
 
-        Minv = self.Minv(q_mod)
+        Minv = self.Minv(q)
         # TODO: should this be p?
         T = GeneralizedT(p, Minv)
         return T + V
