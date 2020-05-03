@@ -44,6 +44,9 @@ def mod_angles(q, angular_dims):
     assert q.ndim == 2
     D = q.size(-1)
     non_angular_dims = list(set(range(D)) - set(angular_dims))
-    q_modded_dims = (q[..., angular_dims] + math.pi) % (2 * math.pi) - math.pi
+    # Map to -pi, pi
+    q_modded_dims = torch.fmod(q[..., angular_dims] + math.pi, 2 * math.pi) + (2. * (q[..., angular_dims] < -math.pi) - 1) * math.pi
+    if (q_modded_dims.abs() > math.pi).any():
+        raise RuntimeError("Angles beyond [-pi, pi]!")
     q_non_modded_dims = q[..., non_angular_dims]
     return torch.cat([q_modded_dims, q_non_modded_dims], dim=-1)
