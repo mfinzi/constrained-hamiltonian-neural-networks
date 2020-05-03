@@ -5,7 +5,7 @@ from torchdiffeq import odeint
 from oil.utils.utils import export, Named
 from biases.models.utils import FCsoftplus, Reshape, Linear, CosSin
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
-from typing import Tuple, Union
+from typing import Tuple
 
 
 @export
@@ -71,7 +71,6 @@ class HNN(nn.Module, metaclass=Named):
         V = self.potential_net(q)
 
         Minv = self.Minv(q)
-        # TODO: should this be p?
         T = GeneralizedT(p, Minv)
         return T + V
 
