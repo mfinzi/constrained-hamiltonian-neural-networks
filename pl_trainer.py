@@ -321,7 +321,7 @@ def parse_cmdline():
     parser.add_argument(
         "--n-epochs-per-val",
         type=int,
-        default=50,
+        default=10,
         help="Number of training epochs per validation step",
     )
     parser.add_argument(
@@ -413,13 +413,12 @@ if __name__ == "__main__":
         writer.writeheader()
         writer.writerow(args_dict)
 
-    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns")
+    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True)
     lr_logger = LearningRateLogger()
     callbacks = [lr_logger]
     trainer = Trainer(
         check_val_every_n_epoch=args.n_epochs_per_val,
         callbacks=callbacks,
-        default_root_dir=exp_dir,
         fast_dev_run=args.debug,
         gpus=args.n_gpus,
         logger=logger,
