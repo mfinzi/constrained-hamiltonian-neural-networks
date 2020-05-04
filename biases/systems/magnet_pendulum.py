@@ -10,10 +10,12 @@ from biases.utils import bodyX2comEuler,comEuler2bodyX, frame2euler,euler2frame
 class MagnetPendulum(RigidBody):
     d=3
     n=1
+    D = 2
+    angular_dims = range(2)
     def __init__(self, mass=1, l=1, q=.05, magnets=5):
         self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()
-        self.body_graph.add_node(0, m=mass, tether=torch.zeros(3), l=l)
+        self.body_graph.add_extended_nd(0, m=mass, d=0, tether=(torch.zeros(3),l))
         self.q = q  # magnetic moment magnitude
         theta = torch.linspace(0, 2 * np.pi, magnets + 1)[:-1]
         self.magnet_positions = torch.stack(
@@ -41,20 +43,20 @@ class MagnetPendulum(RigidBody):
         """ input (bs,2,1,3) output (bs,2,dangular=2,1) """
         *bsT2, n, d = global_pos_vel.shape
         basis = torch.randn(*bsT2,3,d)
-        basis[:,:,2:] =global_pos_vel
+        basis[:,:,2:] =-global_pos_vel
         basis[:,:,2:] /= (basis[:,:1,2:]**2).sum(-1,keepdims=True).sqrt()
         basis[:,:,1] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,1]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
         basis[:,:,1] /= (basis[:,:1,1]**2).sum(-1,keepdims=True).sqrt()
         basis[:,:,0] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
         basis[:,:,0] -=  basis[:,:,1]*(basis[:,:,1]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,1]**2).sum(-1,keepdims=True)
         basis[:,:,0] /= (basis[:,:1,0]**2).sum(-1,keepdims=True).sqrt()
-        return frame2euler(basis)[:,:,:2].unsqueeze(-1)
+        return frame2euler(basis)[:,:,:2]
         
     def body2globalCoords(self, angles_omega):
         """ input (bs,2,dangular=2,1) output (bs,2,1,3) """
-        bs,_,_,_ = angles_omega.shape
+        bs,_,_ = angles_omega.shape
         euler_angles = torch.zeros(bs,2,3)
-        euler_angles[:,:,:2] = angles_omega.squeeze(-1)
+        euler_angles[:,:,:2] = angles_omega
         zhat = euler2frame(euler_angles)[:,:,2]
         return -zhat.unsqueeze(-2) # (bs,2,1,3)
 
