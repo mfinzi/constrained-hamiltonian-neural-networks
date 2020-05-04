@@ -3,7 +3,7 @@ import networkx as nx
 from oil.utils.utils import export
 from biases.systems.rigid_body import RigidBody,BodyGraph,project_onto_constraints
 from biases.systems.chain_pendulum import PendulumAnimation
-from biases.utils import euler2frame,comEuler2bodyX,read_obj
+from biases.utils import euler2frame,comEuler2bodyX,read_obj,bodyX2comEuler
 import numpy as np
 
 @export
@@ -26,6 +26,22 @@ class Gyroscope(RigidBody):
         comEulers[:,1,5] = 6
         bodyX = comEuler2bodyX(comEulers)
         return project_onto_constraints(self.body_graph,bodyX)
+
+    def body2globalCoords(self,eulers):
+        """ input: (bs,2,3) output: (bs,2,4,3) """
+        coms = torch.zeros_like(eulers)
+        comEulers = torch.cat([coms,eulers],dim=-1)
+        bodyX = comEuler2bodyX(comEulers)
+        # need to offset x,v so that joint is stationary
+        # pos joint = 
+        body_attachment = self.body_graph.nodes[0]['joint'][0]
+        ct = torch.cat([1-body_attachment.sum()[None],body_attachment])
+        global_coords_attachment_point = (bodyX*ct[:,None]).sum(-2,keepdims=True) #(bs,2,3)
+        return bodyX-global_coords_attachment_point
+
+    def global2bodyCoords(self,bodyX):
+        """ input: (bs,2,4,3) output: (bs,2,3)"""
+        return bodyX2comEuler(bodyX)[...,3:]
 
     def potential(self, x):
         """ Gravity potential """

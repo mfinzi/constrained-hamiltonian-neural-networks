@@ -54,7 +54,7 @@ class BodyGraph(nx.Graph):
             self.nodes[key1]['joint']=(pos1,pos2)
             if rotation_axis is not None:
                 self.nodes[key1]['rotation_axis']=rotation_axis
-
+    
 def edges_wattribute(G,node,attribute):
     all_edges = G.edges(node,data=True)
     return dict((x[:-1], x[-1][attribute]) for x in edges if attribute in x[-1])
@@ -183,7 +183,10 @@ class RigidBody(object, metaclass=Named):
     def animator(self):
         return Animation
 
-
+    def __str__(self):
+        return self.__class__.__name__
+    def __repr__(self):
+        return str(self)
 
 
 def dist_constraints_DPhi(G,x,v):

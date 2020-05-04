@@ -38,10 +38,6 @@ class Rotor(RigidBody):
     # @property
     # def animator(self):
     #     return RigidAnimation
-    def __str__(self):
-        return "Rotor"
-    def __repr__(self):
-        return str(self)
 
 class RigidAnimation(Animation):
     def __init__(self, qt, body):
