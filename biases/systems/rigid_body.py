@@ -157,7 +157,7 @@ class RigidBody(object, metaclass=Named):
     def dynamics(self, wgrad=False):
         return ConstrainedHamiltonianDynamics(self.hamiltonian, self.DPhi, wgrad=wgrad)
 
-    def integrate(self, z0, T, tol=1e-5,method="dopri5"):  # (x,v) -> (x,p) -> (x,v)
+    def integrate(self, z0, T, tol=1e-7,method="dopri5"):  # (x,v) -> (x,p) -> (x,v)
         """ Integrate system from z0 to times in T (e.g. linspace(0,10,100))"""
         bs = z0.shape[0]
         xp = torch.stack(
