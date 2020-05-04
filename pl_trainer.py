@@ -91,11 +91,11 @@ class DynamicsModel(pl.LightningModule):
     def forward(self):
         raise RuntimeError("This module should not be called")
 
-    def rollout(self, z0, ts, tol):
+    def rollout(self, z0, ts, tol, method="rk4"):
         # z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
         # ts: N x T Tensor representing the time points of true_zs
         # true_zs:  N x T x 2 x n_dof x d sized Tensor
-        pred_zs = self.model.integrate(z0, ts, tol=tol)
+        pred_zs = self.model.integrate(z0, ts, tol=tol, method=method)
         return pred_zs
 
     def trajectory_mse(self, pred_zts, true_zts):
@@ -105,7 +105,7 @@ class DynamicsModel(pl.LightningModule):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="rk4")
         loss = self.trajectory_mse(pred_zs, zts)
 
         logs = {
@@ -118,23 +118,50 @@ class DynamicsModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-        (z0, ts), zts = batch
-        # Assume all ts are equally spaced and dynamics is time translation invariant
-        ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
-        loss = self.trajectory_mse(pred_zs, zts)
-        return {"trajectory_mse": loss.detach()}
+        return self.test_step(batch, batch_idx, integration_factor=0.5)
 
     def validation_epoch_end(self, outputs):
         loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
-        log = {"validation/trajectory_mse": loss}
+        # Average errors across batches
+        rel_err_from_true = (
+            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_true = (
+            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        rel_err_from_pert = (
+            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_pert = (
+            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        int_rel_err_from_true = self.integrate_curve(
+            rel_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_true = self.integrate_curve(
+            abs_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_rel_err_from_pert = self.integrate_curve(
+            rel_err_from_pert.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_pert = self.integrate_curve(
+            abs_err_from_pert.log(), dt=self.hparams.dt
+        )
+
+        log = {
+            "validation/trajectory_mse": loss,
+            "validation/int_rel_err_from_true": int_rel_err_from_true,
+            "validation/int_abs_err_from_true": int_abs_err_from_true,
+            "validation/int_rel_err_from_pert": int_rel_err_from_pert,
+            "validation/int_abs_err_from_pert": int_abs_err_from_pert,
+        }
         return {"val_loss": loss, "log": log}
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, batch_idx, integration_factor=1.0):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="dopri5")
         loss = self.trajectory_mse(pred_zs, zts)
 
         (
@@ -146,7 +173,7 @@ class DynamicsModel(pl.LightningModule):
             rel_err_from_pert,
             abs_err_from_pert,
         ) = self.compare_rollouts(
-            z0, 2.0 * self.hparams.integration_time, self.hparams.dt, self.hparams.tol
+            z0, integration_factor * self.hparams.integration_time, self.hparams.dt, self.hparams.tol
         )
         return {
             "trajectory_mse": loss.detach(),
@@ -161,16 +188,16 @@ class DynamicsModel(pl.LightningModule):
         # Average errors across batches
         rel_err_from_true = (
             collect_tensors("rel_err_from_true", outputs).mean((0, 1))
-        )
+        ) + 1e-8
         abs_err_from_true = (
             collect_tensors("abs_err_from_true", outputs).mean((0, 1))
-        )
+        ) + 1e-8
         rel_err_from_pert = (
             collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
-        )
+        ) + 1e-8
         abs_err_from_pert = (
             collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
-        )
+        ) + 1e-8
         # fig, ax = plt.subplots()
         # ax.plot(rel_err_from_true, label="Relative Error")
         # ax.plot(abs_err_from_true, label="Absolute Error")
@@ -205,19 +232,18 @@ class DynamicsModel(pl.LightningModule):
         # Ground truth is in double so we convert model to double
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
-        self.double()
         self.cpu()
-        z0 = z0.double().cpu()
+        self.double()
+        z0 = z0.cpu().double()
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
-        pred_zts = self.rollout(z0, ts, tol)
+        pred_zts = self.rollout(z0, ts, tol, "dopri5").cpu()
 
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
         if not self.hparams.euclidean:  # convert to euclidean for body to integrate
-            z0 = body.body2globalCoords(z0).to(z0.device)
-            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest)).to(
-                z0.device
-            )
+            z0 = body.body2globalCoords(z0)
+            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest))
+
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
         # (bs, n_steps, 2, n_dof, d)
@@ -237,9 +263,8 @@ class DynamicsModel(pl.LightningModule):
         rel_err_from_pert = sq_diff_from_pert.div(sq_sum_from_pert).sqrt()
         abs_err_from_pert = sq_diff_from_pert.sqrt()
 
-        # TODO: return error from pert
-        self.to(prev_device)
         self.to(prev_dtype)
+        self.to(prev_device)
         return (
             pred_zts,
             true_zts,
@@ -358,10 +383,10 @@ class DynamicsModel(pl.LightningModule):
             choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
         )
         parser.add_argument(
-            "--n-epochs", type=int, default=300, help="Number of training epochs"
+            "--n-epochs", type=int, default=100, help="Number of training epochs"
         )
         parser.add_argument(
-            "--n_hidden", type=int, default=200, help="Number of hidden units"
+            "--n-hidden", type=int, default=200, help="Number of hidden units"
         )
         parser.add_argument(
             "--n-layers", type=int, default=3, help="Number of hidden layers"
@@ -375,7 +400,7 @@ class DynamicsModel(pl.LightningModule):
         parser.add_argument(
             "--tol",
             type=float,
-            default=1e-4,
+            default=1e-7,
             help="Tolerance for numerical intergration",
         )
         parser.add_argument(
@@ -385,7 +410,7 @@ class DynamicsModel(pl.LightningModule):
             help="Forcibly regenerate training data",
         )
         parser.add_argument(
-            "--weight-decay", type=float, default=0.0, help="Weight decay",
+            "--weight-decay", type=float, default=1e-4, help="Weight decay",
         )
         return parser
 
@@ -440,22 +465,22 @@ if __name__ == "__main__":
 
     parser = parse_misc()
     parser = DynamicsModel.add_model_specific_args(parser)
-    args = parser.parse_args()
+    hparams = parser.parse_args()
 
-    dynamics_model = DynamicsModel(hparams=args)
+    dynamics_model = DynamicsModel(hparams=hparams)
 
     # create experiment directory
-    if args.exp_dir == "":
+    if hparams.exp_dir == "":
         exp_dir = os.path.join(
             os.getcwd(),
             "experiments",
             f"{dynamics_model.body.__repr__()}",
-            f"{args.network_class}",
+            f"{hparams.network_class}",
         )
     else:
-        exp_dir = args.exp_dir
+        exp_dir = hparams.exp_dir
     # Note that this args is shared with the model's hparams so it will be saved
-    vars(args).update(exp_dir=exp_dir)
+    vars(hparams).update(exp_dir=exp_dir)
     if not os.path.exists(exp_dir):
         os.makedirs(exp_dir)
         print("Directory ", exp_dir, " Created ")
@@ -468,30 +493,31 @@ if __name__ == "__main__":
         logger.name,
         f"version_{logger.version}",
         "checkpoints",
-        f"epoch={args.n_epochs - 1}.ckpt",
+        f"epoch={hparams.n_epochs - 1}.ckpt",
     )
 
     callbacks = [LearningRateLogger(), SaveTestLogCallback()]
-    vars(args).update(
-        check_val_every_n_epoch=args.n_epochs_per_val,
-        fast_dev_run=args.debug,
-        gpus=args.n_gpus,
-        max_epochs=args.n_epochs,
+    vars(hparams).update(
+        check_val_every_n_epoch=hparams.n_epochs_per_val,
+        fast_dev_run=hparams.debug,
+        gpus=hparams.n_gpus,
+        max_epochs=hparams.n_epochs,
         ckpt_dir=ckpt_dir,
     )
 
     # record human-readable hparams as csv
     with open(os.path.join(logger.experiment.dir, "args.csv"), "w") as csvfile:
-        args_dict = vars(args)  # convert to dict with new copy
+        args_dict = vars(hparams)  # convert to dict with new copy
         writer = csv.DictWriter(csvfile, fieldnames=args_dict.keys())
         writer.writeheader()
         writer.writerow(args_dict)
 
-    trainer = Trainer.from_argparse_args(args, callbacks=callbacks, logger=logger)
+    trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, logger=logger)
 
     trainer.fit(dynamics_model)
 
-    trainer.test()
+    with torch.no_grad():
+        trainer.test()
 
     # ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
     # probably remove logger when resuming since it's a finished experiment
