@@ -36,75 +36,54 @@ def fig_to_img(fig):
 
 
 class DynamicsModel(pl.LightningModule):
-    def __init__(
-        self,
-        hparams: dict,
-        chunk_len: int,
-        batch_size: int,
-        body_class: str,
-        body_args: list,
-        dataset_class: str,
-        dt: float,
-        integration_time: float,
-        lr: float,
-        no_lr_sched: bool,
-        n_epochs: int,
-        n_hidden: int,
-        n_layers: int,
-        n_train: int,
-        n_val: int,
-        n_test: int,
-        network_class: str,
-        optimizer_class: str,
-        regen: bool,
-        seed: int,
-        tol: float,
-        weight_decay: float,
-        **unused_kwargs,
-    ):
+    def __init__(self, hparams: argparse.Namespace):
         super().__init__()
 
-        print("Unused kwargs:", unused_kwargs)
-
-        euclidean = network_class not in [
+        euclidean = hparams.network_class not in [
             "NN",
             "LNN",
             "HNN",
         ]  # TODO: try NN in euclideana
-        hparams.update(euclidean=euclidean)
+        vars(hparams).update(euclidean=euclidean)
 
-        body = str_to_class(body_class)(*body_args)
+        body = str_to_class(hparams.body_class)(*hparams.body_args)
 
-        dataset = str_to_class(dataset_class)(
-            n_systems=n_train + n_val + n_test,
-            regen=regen,
-            chunk_len=chunk_len,
+        dataset = str_to_class(hparams.dataset_class)(
+            n_systems=hparams.n_train + hparams.n_val + hparams.n_test,
+            regen=hparams.regen,
+            chunk_len=hparams.chunk_len,
             body=body,
-            dt=dt,
-            integration_time=integration_time,
+            dt=hparams.dt,
+            integration_time=hparams.integration_time,
             angular_coords=not euclidean,
         )
-        splits = {"train": n_train, "val": n_val, "test": n_test}
-        with FixedNumpySeed(seed):
+        splits = {
+            "train": hparams.n_train,
+            "val": hparams.n_val,
+            "test": hparams.n_test,
+        }
+        with FixedNumpySeed(hparams.seed):
             datasets = split_dataset(dataset, splits)
 
         net_cfg = {
             "dof_ndim": body.d if euclidean else body.D,
             "angular_dims": body.angular_dims,
-            "hidden_size": n_hidden,
-            "num_layers": n_layers,
+            "hidden_size": hparams.n_hidden,
+            "num_layers": hparams.n_layers,
             "wgrad": True,
         }
-        hparams.update(**net_cfg)
+        vars(hparams).update(**net_cfg)
 
-        model = str_to_class(network_class)(G=body.body_graph, **net_cfg)
+        model = str_to_class(hparams.network_class)(G=body.body_graph, **net_cfg)
 
         self.hparams = hparams
         self.model = model
         self.body = body
         self.datasets = datasets
         self.splits = splits
-        self.batch_sizes = {k: min(batch_size, v) for k, v in splits.items()}
+        self.batch_sizes = {
+            k: min(self.hparams.batch_size, v) for k, v in splits.items()
+        }
 
     def forward(self):
         raise RuntimeError("This module should not be called")
@@ -123,7 +102,7 @@ class DynamicsModel(pl.LightningModule):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
         loss = self.trajectory_mse(pred_zs, zts)
 
         logs = {
@@ -139,7 +118,7 @@ class DynamicsModel(pl.LightningModule):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
         loss = self.trajectory_mse(pred_zs, zts)
         return {"trajectory_mse": loss.detach()}
 
@@ -152,13 +131,13 @@ class DynamicsModel(pl.LightningModule):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
         loss = self.trajectory_mse(pred_zs, zts)
 
         batch_trajectory_time = (ts[-1] - ts[0]).item()
         dt = (ts[1] - ts[0]).item()
         pred_zts, true_zts, _, rel_error, abs_error = self.compare_rollouts(
-            z0, 50 * batch_trajectory_time, dt, self.hparams["tol"]
+            z0, 50 * batch_trajectory_time, dt, self.hparams.tol
         )
         return {
             "trajectory_mse": loss.detach(),
@@ -201,9 +180,11 @@ class DynamicsModel(pl.LightningModule):
 
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
-        if not self.hparams["euclidean"]:  # convert to euclidean for body to integrate
+        if not self.hparams.euclidean:  # convert to euclidean for body to integrate
             z0 = body.body2globalCoords(z0).to(z0.device)
-            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest)).to(z0.device)
+            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest)).to(
+                z0.device
+            )
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
         # (bs, n_steps, 2, n_dof, d)
@@ -225,18 +206,16 @@ class DynamicsModel(pl.LightningModule):
         return pred_zts, true_zts, true_zts_pert, rel_error, abs_error
 
     def configure_optimizers(self):
-        optimizer = getattr(torch.optim, self.hparams["optimizer_class"])(
+        optimizer = getattr(torch.optim, self.hparams.optimizer_class)(
             self.parameters(),
-            lr=self.hparams["lr"],
-            weight_decay=self.hparams["weight_decay"],
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay,
         )
-        if self.hparams["no_lr_sched"]:
+        if self.hparams.no_lr_sched:
             return optimizer
         else:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=self.hparams["n_epochs"],
-                eta_min=0.,
+                optimizer, T_max=self.hparams.n_epochs, eta_min=0.0,
             )
             return [optimizer], [scheduler]
 
@@ -267,43 +246,106 @@ class DynamicsModel(pl.LightningModule):
             shuffle=False,
         )
 
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser.add_argument("--batch-size", type=int, default=200, help="Batch size")
+        parser.add_argument(
+            "--body-class",
+            type=str,
+            help="Class name of physical system",
+            required=True,
+        )
+        parser.add_argument(
+            "--body-args",
+            help="Arguments to initialize physical system separated by spaces",
+            nargs="*",
+            type=int,
+            default=[],
+        )
+        parser.add_argument(
+            "--no-lr-sched",
+            action="store_true",
+            default=False,
+            help="Turn off cosine annealing for learing rate",
+        )
+        parser.add_argument(
+            "--chunk-len",
+            type=int,
+            default=5,
+            help="Length of each chunk of training trajectory",
+        )
+        parser.add_argument(
+            "--dataset-class",
+            type=str,
+            default="RigidBodyDataset",
+            help="Dataset class",
+        )
+        parser.add_argument(
+            "--dt", type=float, default=1e-1, help="Timestep size in generated data"
+        )
+        parser.add_argument(
+            "--integration-time",
+            type=float,
+            default=10.0,
+            help="Amount of time to integrate for in generating training trajectories",
+        )
+        parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+        parser.add_argument(
+            "--n-test", type=int, default=100, help="Number of test trajectories"
+        )
+        parser.add_argument(
+            "--n-train", type=int, default=800, help="Number of train trajectories"
+        )
+        parser.add_argument(
+            "--n-val", type=int, default=100, help="Number of validation trajectories"
+        )
+        parser.add_argument(
+            "--network-class",
+            type=str,
+            help="Dynamics network",
+            choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
+        )
+        parser.add_argument(
+            "--n-epochs", type=int, default=300, help="Number of training epochs"
+        )
+        parser.add_argument(
+            "--n_hidden", type=int, default=200, help="Number of hidden units"
+        )
+        parser.add_argument(
+            "--n-layers", type=int, default=3, help="Number of hidden layers"
+        )
+        parser.add_argument(
+            "--optimizer_class", type=str, default="AdamW", help="Optimizer",
+        )
+        parser.add_argument(
+            "--seed", type=int, default=0, help="Seed used to generate dataset",
+        )
+        parser.add_argument(
+            "--tol",
+            type=float,
+            default=1e-4,
+            help="Tolerance for numerical intergration",
+        )
+        parser.add_argument(
+            "--regen",
+            action="store_true",
+            default=False,
+            help="Forcibly regenerate training data",
+        )
+        parser.add_argument(
+            "--weight-decay", type=float, default=0.0, help="Weight decay",
+        )
+        return parser
 
-def parse_cmdline():
+
+def parse_misc():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch-size", type=int, default=200, help="Batch size")
-    parser.add_argument(
-        "--body-class", type=str, help="Class name of physical system", required=True,
-    )
-    parser.add_argument(
-        "--body-args",
-        help="Arguments to initialize physical system separated by spaces",
-        nargs="*",
-        type=int,
-        default=[]
-    )
-    parser.add_argument(
-        "--no-lr-sched",
-        action="store_true",
-        default=False,
-        help="Turn off cosine annealing for learing rate",
-    )
-    parser.add_argument(
-        "--chunk-len",
-        type=int,
-        default=5,
-        help="Length of each chunk of training trajectory",
-    )
-    parser.add_argument(
-        "--dataset-class", type=str, default="RigidBodyDataset", help="Dataset class",
-    )
     parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
         help="Debug code by running 1 batch of train, val, and test.",
-    )
-    parser.add_argument(
-        "--dt", type=float, default=1e-1, help="Timestep size in generated data"
     )
     parser.add_argument(
         "--exp-dir",
@@ -312,62 +354,13 @@ def parse_cmdline():
         help="Directory to save files from this experiment",
     )
     parser.add_argument(
-        "--integration-time",
-        type=float,
-        default=10.0,
-        help="Amount of time to integrate for in generating training trajectories",
-    )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument(
         "--n-epochs-per-val",
         type=int,
         default=10,
         help="Number of training epochs per validation step",
     )
-    parser.add_argument(
-        "--n-test", type=int, default=100, help="Number of test trajectories"
-    )
-    parser.add_argument(
-        "--n-train", type=int, default=800, help="Number of train trajectories"
-    )
-    parser.add_argument(
-        "--n-val", type=int, default=100, help="Number of validation trajectories"
-    )
-    parser.add_argument(
-        "--network-class",
-        type=str,
-        help="Dynamics network",
-        choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
-    )
-    parser.add_argument(
-        "--n-epochs", type=int, default=300, help="Number of training epochs"
-    )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
-    parser.add_argument(
-        "--n_hidden", type=int, default=200, help="Number of hidden units"
-    )
-    parser.add_argument(
-        "--n-layers", type=int, default=3, help="Number of hidden layers"
-    )
-    parser.add_argument(
-        "--optimizer_class", type=str, default="AdamW", help="Optimizer",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=0, help="Seed used to generate dataset",
-    )
-    parser.add_argument(
-        "--tol", type=float, default=1e-4, help="Tolerance for numerical intergration",
-    )
-    parser.add_argument(
-        "--regen",
-        action="store_true",
-        default=False,
-        help="Forcibly regenerate training data",
-    )
-    parser.add_argument(
-        "--weight-decay", type=float, default=0., help="Weight decay",
-    )
-    return parser.parse_args()
+    return parser
 
 
 if __name__ == "__main__":
@@ -385,46 +378,64 @@ if __name__ == "__main__":
     from pytorch_lightning.loggers import WandbLogger
     from pytorch_lightning.callbacks import LearningRateLogger
 
-    args = parse_cmdline()
-    args_dict = dict(vars(args))  # convert to dict with new copy
+    parser = parse_misc()
+    parser = DynamicsModel.add_model_specific_args(parser)
+    args = parser.parse_args()
 
-    dynamics_model = DynamicsModel(hparams=args_dict, **args_dict)
+    dynamics_model = DynamicsModel(hparams=args)
 
+    # create experiment directory
     if args.exp_dir == "":
-        exp_dir = "/".join(
-            [
-                ".",
-                "experiments",
-                f"{dynamics_model.body.__repr__()}",
-                f"{args.network_class}",
-            ]
+        exp_dir = os.path.join(
+            os.getcwd(),
+            "experiments",
+            f"{dynamics_model.body.__repr__()}",
+            f"{args.network_class}",
         )
     else:
         exp_dir = args.exp_dir
-
+    # Note that this args is shared with the model's hparams so it will be saved
+    vars(args).update(exp_dir=exp_dir)
     if not os.path.exists(exp_dir):
         os.makedirs(exp_dir)
         print("Directory ", exp_dir, " Created ")
     else:
         print("Directory ", exp_dir, " already exists")
 
-    with open(exp_dir + "/args.csv", "w") as csvfile:
+    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True)
+    ckpt_dir = os.path.join(
+        logger.experiment.dir,
+        logger.name,
+        f"version_{logger.version}",
+        "checkpoints",
+        f"epoch={args.n_epochs - 1}.ckpt",
+    )
+    lr_logger = LearningRateLogger()
+    callbacks = [lr_logger]
+    vars(args).update(
+        check_val_every_n_epoch=args.n_epochs_per_val,
+        fast_dev_run=args.debug,
+        gpus=args.n_gpus,
+        max_epochs=args.n_epochs,
+        ckpt_dir=ckpt_dir,
+    )
+
+    # record human-readable hparams as csv
+    with open(os.path.join(logger.experiment.dir, "args.csv"), "w") as csvfile:
+        args_dict = vars(args)  # convert to dict with new copy
         writer = csv.DictWriter(csvfile, fieldnames=args_dict.keys())
         writer.writeheader()
         writer.writerow(args_dict)
 
-    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True)
-    lr_logger = LearningRateLogger()
-    callbacks = [lr_logger]
-    trainer = Trainer(
-        check_val_every_n_epoch=args.n_epochs_per_val,
-        callbacks=callbacks,
-        fast_dev_run=args.debug,
-        gpus=args.n_gpus,
-        logger=logger,
-        max_epochs=args.n_epochs,
-    )
+    trainer = Trainer.from_argparse_args(args, callbacks=callbacks, logger=logger)
 
     trainer.fit(dynamics_model)
 
     trainer.test()
+
+    #ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
+    # probably remove logger when resuming since it's a finished experiment
+    #loaded_trainer = Trainer(
+    #    resume_from_checkpoint=ckpt_path, callbacks=callbacks, logger=logger
+    #)
+    # loaded_model = DynamicsModel.load_from_checkpoint(ckpt_path)
