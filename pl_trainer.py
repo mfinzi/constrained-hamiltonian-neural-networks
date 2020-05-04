@@ -18,6 +18,8 @@ from torch import Tensor
 import wandb
 import PIL
 
+import numpy as np
+
 
 def str_to_class(classname):
     return getattr(sys.modules[__name__], classname)
@@ -84,6 +86,7 @@ class DynamicsModel(pl.LightningModule):
         self.batch_sizes = {
             k: min(self.hparams.batch_size, v) for k, v in splits.items()
         }
+        self.test_log = None
 
     def forward(self):
         raise RuntimeError("This module should not be called")
@@ -134,37 +137,67 @@ class DynamicsModel(pl.LightningModule):
         pred_zs = self.rollout(z0, ts, tol=self.hparams.tol)
         loss = self.trajectory_mse(pred_zs, zts)
 
-        batch_trajectory_time = (ts[-1] - ts[0]).item()
-        dt = (ts[1] - ts[0]).item()
-        pred_zts, true_zts, _, rel_error, abs_error = self.compare_rollouts(
-            z0, 50 * batch_trajectory_time, dt, self.hparams.tol
+        (
+            pred_zts,
+            true_zts,
+            true_zts_pert,
+            rel_err_from_true,
+            abs_err_from_true,
+            rel_err_from_pert,
+            abs_err_from_pert,
+        ) = self.compare_rollouts(
+            z0, 2.0 * self.hparams.integration_time, self.hparams.dt, self.hparams.tol
         )
         return {
             "trajectory_mse": loss.detach(),
-            "rel_error": rel_error.detach(),
-            "abs_error": abs_error.detach(),
+            "rel_err_from_true": rel_err_from_true.detach(),
+            "abs_err_from_true": abs_err_from_true.detach(),
+            "rel_err_from_pert": rel_err_from_pert.detach(),
+            "abs_err_from_pert": abs_err_from_pert.detach(),
         }
 
     def test_epoch_end(self, outputs):
         loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
         # Average errors across batches
-        rel_error = collect_tensors("rel_error", outputs).mean((0, 1)).numpy()
-        abs_error = collect_tensors("abs_error", outputs).mean((0, 1)).numpy()
-        fig, ax = plt.subplots()
-        ax.plot(rel_error, label="Relative Error")
-        ax.plot(abs_error, label="Absolute Error")
-        ax.set(yscale="log", xlabel="Forward prediction (x 0.1 seconds)")
-        ax.legend()
-
-        # TODO: save arrays as temporary files and then wandb.save
-        # self.logger.experiment.save(rel_error)
-        # self.logger.experiment.save(abs_error)
+        rel_err_from_true = (
+            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
+        )
+        abs_err_from_true = (
+            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
+        )
+        rel_err_from_pert = (
+            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
+        )
+        abs_err_from_pert = (
+            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
+        )
+        # fig, ax = plt.subplots()
+        # ax.plot(rel_err_from_true, label="Relative Error")
+        # ax.plot(abs_err_from_true, label="Absolute Error")
+        # ax.set(yscale="log", xlabel=f"Forward prediction (x {self.hparams.dt:.1f} seconds)")
+        # ax.legend()
+        int_rel_err_from_true = self.integrate_curve(
+            rel_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_true = self.integrate_curve(
+            abs_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_rel_err_from_pert = self.integrate_curve(
+            rel_err_from_pert.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_pert = self.integrate_curve(
+            abs_err_from_pert.log(), dt=self.hparams.dt
+        )
 
         log = {
             "test/trajectory_mse": loss,
-            "test/rollout_error": fig_to_img(fig),
+            # "test/rollout_error": fig_to_img(fig),
+            "test/int_rel_err_from_true": int_rel_err_from_true,
+            "test/int_abs_err_from_true": int_abs_err_from_true,
+            "test/int_rel_err_from_pert": int_rel_err_from_pert,
+            "test/int_abs_err_from_pert": int_abs_err_from_pert,
         }
-        return {"log": log}
+        return {"log": log, "test_log": log}
 
     def compare_rollouts(
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
@@ -195,15 +228,33 @@ class DynamicsModel(pl.LightningModule):
 
         sq_diff_from_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
         sq_sum_from_true = (pred_zts + true_zts).pow(2).sum((2, 3, 4))
+        sq_diff_from_pert = (pred_zts - true_zts_pert).pow(2).sum((2, 3, 4))
+        sq_sum_from_pert = (pred_zts + true_zts_pert).pow(2).sum((2, 3, 4))
 
         # (bs, n_step)
-        rel_error = sq_diff_from_true.div(sq_sum_from_true).sqrt()
-        abs_error = sq_diff_from_true.sqrt()
+        rel_err_from_true = sq_diff_from_true.div(sq_sum_from_true).sqrt()
+        abs_err_from_true = sq_diff_from_true.sqrt()
+        rel_err_from_pert = sq_diff_from_pert.div(sq_sum_from_pert).sqrt()
+        abs_err_from_pert = sq_diff_from_pert.sqrt()
 
-        # TODO: compute error from pert
+        # TODO: return error from pert
         self.to(prev_device)
         self.to(prev_dtype)
-        return pred_zts, true_zts, true_zts_pert, rel_error, abs_error
+        return (
+            pred_zts,
+            true_zts,
+            true_zts_pert,
+            rel_err_from_true,
+            abs_err_from_true,
+            rel_err_from_pert,
+            abs_err_from_pert,
+        )
+
+    def integrate_curve(self, y, t=None, dt=1.0, axis=-1):
+        # If y is error, then we want to minimize the returned result
+        if torch.is_tensor(y):
+            y = y.detach().cpu().numpy()
+        return np.trapz(y, t, dx=dt, axis=axis)
 
     def configure_optimizers(self):
         optimizer = getattr(torch.optim, self.hparams.optimizer_class)(
@@ -339,6 +390,15 @@ class DynamicsModel(pl.LightningModule):
         return parser
 
 
+class SaveTestLogCallback(pl.Callback):
+    def on_test_end(self, trainer, pl_module):
+        assert type(logger) == WandbLogger
+        save_dir = os.path.join(trainer.logger.experiment.dir, "test_log.pt")
+        if "test_log" in trainer.callback_metrics:
+            # Use torch.save in case we want to save pytorch tensors or modules
+            torch.save(trainer.callback_metrics["test_log"], save_dir)
+
+
 def parse_misc():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -410,8 +470,8 @@ if __name__ == "__main__":
         "checkpoints",
         f"epoch={args.n_epochs - 1}.ckpt",
     )
-    lr_logger = LearningRateLogger()
-    callbacks = [lr_logger]
+
+    callbacks = [LearningRateLogger(), SaveTestLogCallback()]
     vars(args).update(
         check_val_every_n_epoch=args.n_epochs_per_val,
         fast_dev_run=args.debug,
@@ -433,9 +493,9 @@ if __name__ == "__main__":
 
     trainer.test()
 
-    #ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
+    # ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
     # probably remove logger when resuming since it's a finished experiment
-    #loaded_trainer = Trainer(
+    # loaded_trainer = Trainer(
     #    resume_from_checkpoint=ckpt_path, callbacks=callbacks, logger=logger
-    #)
+    # )
     # loaded_model = DynamicsModel.load_from_checkpoint(ckpt_path)
