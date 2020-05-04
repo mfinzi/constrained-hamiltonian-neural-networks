@@ -383,6 +383,7 @@ if __name__ == "__main__":
     from biases.datasets import RigidBodyDataset
     from pytorch_lightning import Trainer
     from pytorch_lightning.loggers import WandbLogger
+    from pytorch_lightning.callbacks import LearningRateLogger
 
     args = parse_cmdline()
     args_dict = dict(vars(args))  # convert to dict with new copy
@@ -413,9 +414,11 @@ if __name__ == "__main__":
         writer.writerow(args_dict)
 
     logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns")
-
+    lr_logger = LearningRateLogger()
+    callbacks = [lr_logger]
     trainer = Trainer(
         check_val_every_n_epoch=args.n_epochs_per_val,
+        callbacks=callbacks,
         default_root_dir=exp_dir,
         fast_dev_run=args.debug,
         gpus=args.n_gpus,
