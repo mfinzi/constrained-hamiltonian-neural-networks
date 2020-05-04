@@ -41,24 +41,31 @@ class MagnetPendulum(RigidBody):
 
     def global2bodyCoords(self, global_pos_vel):
         """ input (bs,2,1,3) output (bs,2,dangular=2,1) """
-        *bsT2, n, d = global_pos_vel.shape
-        basis = torch.randn(*bsT2,3,d)
-        basis[:,:,2:] =-global_pos_vel
-        basis[:,:,2:] /= (basis[:,:1,2:]**2).sum(-1,keepdims=True).sqrt()
-        basis[:,:,1] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,1]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
-        basis[:,:,1] /= (basis[:,:1,1]**2).sum(-1,keepdims=True).sqrt()
-        basis[:,:,0] -=  basis[:,:,2]*(basis[:,:,2]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,2]**2).sum(-1,keepdims=True)
-        basis[:,:,0] -=  basis[:,:,1]*(basis[:,:,1]*basis[:,:,0]).sum(-1,keepdims=True)/(basis[:,:,1]**2).sum(-1,keepdims=True)
-        basis[:,:,0] /= (basis[:,:1,0]**2).sum(-1,keepdims=True).sqrt()
-        return frame2euler(basis)[:,:,:2]
+        bsT,_ , n, d = global_pos_vel.shape
+        x,y,z = global_pos_vel[:,0,0,:].T
+        xd,yd,zd = global_pos_vel[:,1,0,:].T
+        phi = torch.atan2(y,x)
+        rz = (x**2+y**2).sqrt()
+        r = (rz**2 + z**2).sqrt()
+        theta = torch.atan2(rz,z)
+        phid = (x*yd-y*xd)/rz**2
+        thetad = ((xd*x*z+yd*y*z)/rz - rz*zd)/r**2
+        angles = torch.stack([phi,theta],dim=-1)
+        anglesd = torch.stack([phid,thetad],dim=-1)
+        angles_omega = torch.stack([angles,anglesd],dim=1)
+        return angles_omega
+
         
     def body2globalCoords(self, angles_omega):
         """ input (bs,2,dangular=2,1) output (bs,2,1,3) """
         bs,_,_ = angles_omega.shape
         euler_angles = torch.zeros(bs,2,3)
-        euler_angles[:,:,:2] = angles_omega
+        euler_angles[:,:,:2] = angles_omega[...,:2]
+        # To treat z axis of ZXZ euler angles as spherical coordinates
+        # simply set (alpha,beta,gamma) = (phi+pi/2,theta,0)
+        euler_angles[:,0,0] += np.pi/2 
         zhat = euler2frame(euler_angles)[:,:,2]
-        return -zhat.unsqueeze(-2) # (bs,2,1,3)
+        return zhat.unsqueeze(-2) # (bs,2,1,3)
 
     def potential(self, x):
         """ Gravity potential """
