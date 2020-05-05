@@ -286,6 +286,9 @@ class DynamicsModel(pl.LightningModule):
     def true_energy(self, zs):
         zs = zs.double()
         N, T = zs.shape[:2]
+        q, qdot = zs.chunk(2, dim=2)
+        p = self.body.M @ qdot
+        zs = torch.cat([q, p], dim=2)
         energy = self.body.hamiltonian(None, zs.view(N * T, -1))
         return energy.view(N, T)
 
