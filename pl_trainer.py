@@ -441,7 +441,7 @@ def parse_misc():
     parser.add_argument(
         "--n-epochs-per-val",
         type=int,
-        default=10,
+        default=25,
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
