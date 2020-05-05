@@ -51,15 +51,17 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
 if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
-        #defaults["save"] = False
+        defaults["save"] = False
         namespace = (lieGroups,datasets,systems,models)
         cfg = argupdated_config(defaults, namespace=namespace)
         cfg.pop('local_rank')
+        save = cfg.pop('save')
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
-        rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
-        fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
-        with open(fname,'wb') as f:
-            pickle.dump(rollouts,f)
+        if save: print(f"saved at: {trainer.save_checkpoint()}")
+        # rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
+        # fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
+        # with open(fname,'wb') as f:
+        #     pickle.dump(rollouts,f)
         #defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
         #print(Trial()))

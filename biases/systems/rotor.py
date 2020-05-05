@@ -33,7 +33,10 @@ class Rotor(RigidBody):
         return comEuler2bodyX(comEulers)
     def global2bodyCoords(self,bodyX):
         """ input: (bs,2,4,3) output: (bs,2,6)"""
-        return bodyX2comEuler(bodyX)
+        comEuler = bodyX2comEuler(bodyX)
+        #unwrap euler angles for continuous trajectories
+        comEuler[:,0,3:] = torch.from_numpy(np.unwrap(comEuler[:,0,3:],axis=0))
+        return comEuler
 
     # @property
     # def animator(self):
