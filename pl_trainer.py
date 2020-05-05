@@ -289,8 +289,8 @@ class DynamicsModel(pl.LightningModule):
         q, qdot = zs.chunk(2, dim=2)
         p = self.body.M @ qdot
         zs = torch.cat([q, p], dim=2)
-        energy = self.body.hamiltonian(None, zs.view(N * T, -1))
-        return energy.view(N, T)
+        energy = self.body.hamiltonian(None, zs.reshape(N * T, -1))
+        return energy.reshape(N, T)
 
     def integrate_curve(self, y, t=None, dt=1.0, axis=-1):
         # If y is error, then we want to minimize the returned result
