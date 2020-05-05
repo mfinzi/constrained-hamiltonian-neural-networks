@@ -19,6 +19,16 @@ import wandb
 import PIL
 
 import numpy as np
+from biases.systems.chain_pendulum import ChainPendulum
+from biases.systems.rotor import Rotor
+from biases.systems.magnet_pendulum import MagnetPendulum
+from biases.systems.gyroscope import Gyroscope
+from biases.models.constrained_hnn import CHNN, CHLC
+from biases.models.constrained_lnn import CLNN, CLLC
+from biases.models.hnn import HNN
+from biases.models.lnn import LNN
+from biases.models.nn import NN, DeltaNN
+from biases.datasets import RigidBodyDataset
 
 
 def str_to_class(classname):
@@ -26,7 +36,11 @@ def str_to_class(classname):
 
 
 def collect_tensors(field, outputs):
-    return torch.stack([log[field] for log in outputs], dim=0)
+    res = torch.stack([log[field] for log in outputs], dim=0)
+    if res.ndim == 1:
+        return res
+    else:
+        return res.flatten(0, 1)
 
 
 def fig_to_img(fig):
@@ -121,41 +135,9 @@ class DynamicsModel(pl.LightningModule):
         return self.test_step(batch, batch_idx, integration_factor=0.5)
 
     def validation_epoch_end(self, outputs):
-        loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
-        # Average errors across batches
-        rel_err_from_true = (
-            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
-        ) + 1e-8
-        abs_err_from_true = (
-            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
-        ) + 1e-8
-        rel_err_from_pert = (
-            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
-        ) + 1e-8
-        abs_err_from_pert = (
-            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
-        ) + 1e-8
-        int_rel_err_from_true = self.integrate_curve(
-            rel_err_from_true.log(), dt=self.hparams.dt
-        )
-        int_abs_err_from_true = self.integrate_curve(
-            abs_err_from_true.log(), dt=self.hparams.dt
-        )
-        int_rel_err_from_pert = self.integrate_curve(
-            rel_err_from_pert.log(), dt=self.hparams.dt
-        )
-        int_abs_err_from_pert = self.integrate_curve(
-            abs_err_from_pert.log(), dt=self.hparams.dt
-        )
-
-        log = {
-            "validation/trajectory_mse": loss,
-            "validation/int_rel_err_from_true": int_rel_err_from_true,
-            "validation/int_abs_err_from_true": int_abs_err_from_true,
-            "validation/int_rel_err_from_pert": int_rel_err_from_pert,
-            "validation/int_abs_err_from_pert": int_abs_err_from_pert,
-        }
-        return {"val_loss": loss, "log": log}
+        log, save = self._collect_test_steps(outputs)
+        log = {f"validation/{k}": v for k, v in log.items()}
+        return {"val_loss": log["validation/trajectory_mse"], "log": log}
 
     def test_step(self, batch, batch_idx, integration_factor=1.0):
         (z0, ts), zts = batch
@@ -167,64 +149,90 @@ class DynamicsModel(pl.LightningModule):
         (
             pred_zts,
             true_zts,
-            true_zts_pert,
-            rel_err_from_true,
-            abs_err_from_true,
-            rel_err_from_pert,
-            abs_err_from_pert,
+            pert_zts,
+            rel_err_pred_true,
+            abs_err_pred_true,
+            rel_err_pert_true,
+            abs_err_pert_true,
         ) = self.compare_rollouts(
-            z0, integration_factor * self.hparams.integration_time, self.hparams.dt, self.hparams.tol
+            z0,
+            integration_factor * self.hparams.integration_time,
+            self.hparams.dt,
+            self.hparams.tol,
         )
+        pred_zts_true_energy = self.true_energy(pred_zts)
+        true_zts_true_energy = self.true_energy(true_zts)
+        pert_zts_true_energy = self.true_energy(pert_zts)
+
         return {
             "trajectory_mse": loss.detach(),
-            "rel_err_from_true": rel_err_from_true.detach(),
-            "abs_err_from_true": abs_err_from_true.detach(),
-            "rel_err_from_pert": rel_err_from_pert.detach(),
-            "abs_err_from_pert": abs_err_from_pert.detach(),
+            "pred_zts": pred_zts.detach(),
+            "true_zts": true_zts.detach(),
+            "pert_zts": pert_zts.detach(),
+            "rel_err_pred_true": rel_err_pred_true.detach(),
+            "abs_err_pred_true": abs_err_pred_true.detach(),
+            "rel_err_pert_true": rel_err_pert_true.detach(),
+            "abs_err_pert_true": abs_err_pert_true.detach(),
+            "pred_zts_true_energy": pred_zts_true_energy.detach(),
+            "true_zts_true_energy": true_zts_true_energy.detach(),
+            "pert_zts_true_energy": pert_zts_true_energy.detach(),
         }
 
-    def test_epoch_end(self, outputs):
+    def _collect_test_steps(self, outputs):
         loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
         # Average errors across batches
-        rel_err_from_true = (
-            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
-        ) + 1e-8
-        abs_err_from_true = (
-            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
-        ) + 1e-8
-        rel_err_from_pert = (
-            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
-        ) + 1e-8
-        abs_err_from_pert = (
-            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
-        ) + 1e-8
-        # fig, ax = plt.subplots()
-        # ax.plot(rel_err_from_true, label="Relative Error")
-        # ax.plot(abs_err_from_true, label="Absolute Error")
-        # ax.set(yscale="log", xlabel=f"Forward prediction (x {self.hparams.dt:.1f} seconds)")
-        # ax.legend()
-        int_rel_err_from_true = self.integrate_curve(
-            rel_err_from_true.log(), dt=self.hparams.dt
-        )
-        int_abs_err_from_true = self.integrate_curve(
-            abs_err_from_true.log(), dt=self.hparams.dt
-        )
-        int_rel_err_from_pert = self.integrate_curve(
-            rel_err_from_pert.log(), dt=self.hparams.dt
-        )
-        int_abs_err_from_pert = self.integrate_curve(
-            abs_err_from_pert.log(), dt=self.hparams.dt
-        )
+        rel_err_pred_true = (collect_tensors("rel_err_pred_true", outputs)) + 1e-8
+        abs_err_pred_true = (collect_tensors("abs_err_pred_true", outputs)) + 1e-8
+        rel_err_pert_true = (collect_tensors("rel_err_pert_true", outputs)) + 1e-8
+        abs_err_pert_true = (collect_tensors("abs_err_pert_true", outputs)) + 1e-8
+        # average of integration of log errs
+        int_rel_err_pred_true = self.integrate_curve(
+            rel_err_pred_true.log(), dt=self.hparams.dt
+        ).mean(0)
+        int_abs_err_pred_true = self.integrate_curve(
+            abs_err_pred_true.log(), dt=self.hparams.dt
+        ).mean(0)
+        int_rel_err_pert_true = self.integrate_curve(
+            rel_err_pert_true.log(), dt=self.hparams.dt
+        ).mean(0)
+        int_abs_err_pert_true = self.integrate_curve(
+            abs_err_pert_true.log(), dt=self.hparams.dt
+        ).mean(0)
 
+        pred_zts_true_energy = collect_tensors("pred_zts_true_energy", outputs)
+        true_zts_true_energy = collect_tensors("true_zts_true_energy", outputs)
+        pert_zts_true_energy = collect_tensors("pert_zts_true_energy", outputs)
+
+        int_pred_true_energy = self.integrate_curve(
+            pred_zts_true_energy, dt=self.hparams.dt
+        ).mean(0)
+        int_true_true_energy = self.integrate_curve(
+            true_zts_true_energy, dt=self.hparams.dt
+        ).mean(0)
+        int_pert_true_energy = self.integrate_curve(
+            pert_zts_true_energy, dt=self.hparams.dt
+        ).mean(0)
         log = {
-            "test/trajectory_mse": loss,
-            # "test/rollout_error": fig_to_img(fig),
-            "test/int_rel_err_from_true": int_rel_err_from_true,
-            "test/int_abs_err_from_true": int_abs_err_from_true,
-            "test/int_rel_err_from_pert": int_rel_err_from_pert,
-            "test/int_abs_err_from_pert": int_abs_err_from_pert,
+            "trajectory_mse": loss,
+            "int_rel_err_pred_true": int_rel_err_pred_true,
+            "int_abs_err_pred_true": int_abs_err_pred_true,
+            "int_rel_err_pert_true": int_rel_err_pert_true,
+            "int_abs_err_pert_true": int_abs_err_pert_true,
+            "int_pred_true_energy": int_pred_true_energy,
+            "int_true_true_energy": int_true_true_energy,
+            "int_pert_true_energy": int_pert_true_energy,
         }
-        return {"log": log, "test_log": log}
+        pred_zts = collect_tensors("pred_zts", outputs)
+        true_zts = collect_tensors("true_zts", outputs)
+        pert_zts = collect_tensors("pert_zts", outputs)
+        save = {"pred_zts": pred_zts, "true_zts": true_zts, "pert_zts": pert_zts}
+        save.update(log)
+        return log, save
+
+    def test_epoch_end(self, outputs):
+        log, save = self._collect_test_steps(outputs)
+        log = {f"test/{k}": v for k, v in log.items()}
+        return {"log": log, "test_log": save}
 
     def compare_rollouts(
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
@@ -250,30 +258,36 @@ class DynamicsModel(pl.LightningModule):
         true_zts = body.integrate(z0, ts, tol=tol)
 
         perturbation = pert_eps * torch.randn_like(z0)
-        true_zts_pert = body.integrate(z0 + perturbation, ts, tol=tol)
+        pert_zts = body.integrate(z0 + perturbation, ts, tol=tol)
 
-        sq_diff_from_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
-        sq_sum_from_true = (pred_zts + true_zts).pow(2).sum((2, 3, 4))
-        sq_diff_from_pert = (pred_zts - true_zts_pert).pow(2).sum((2, 3, 4))
-        sq_sum_from_pert = (pred_zts + true_zts_pert).pow(2).sum((2, 3, 4))
+        sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
+        sq_diff_pert_true = (true_zts - pert_zts).pow(2).sum((2, 3, 4))
+        sq_sum_pred_true = (pred_zts + true_zts).pow(2).sum((2, 3, 4))
+        sq_sum_pert_true = (true_zts + pert_zts).pow(2).sum((2, 3, 4))
 
         # (bs, n_step)
-        rel_err_from_true = sq_diff_from_true.div(sq_sum_from_true).sqrt()
-        abs_err_from_true = sq_diff_from_true.sqrt()
-        rel_err_from_pert = sq_diff_from_pert.div(sq_sum_from_pert).sqrt()
-        abs_err_from_pert = sq_diff_from_pert.sqrt()
+        rel_err_pred_true = sq_diff_pred_true.div(sq_sum_pred_true).sqrt()
+        abs_err_pred_true = sq_diff_pred_true.sqrt()
+        rel_err_pert_true = sq_diff_pert_true.div(sq_sum_pert_true).sqrt()
+        abs_err_pert_true = sq_diff_pert_true.sqrt()
 
         self.to(prev_dtype)
         self.to(prev_device)
         return (
             pred_zts,
             true_zts,
-            true_zts_pert,
-            rel_err_from_true,
-            abs_err_from_true,
-            rel_err_from_pert,
-            abs_err_from_pert,
+            pert_zts,
+            rel_err_pred_true,
+            abs_err_pred_true,
+            rel_err_pert_true,
+            abs_err_pert_true,
         )
+
+    def true_energy(self, zs):
+        zs = zs.double()
+        N, T = zs.shape[:2]
+        energy = self.body.hamiltonian(None, zs.view(N * T, -1))
+        return energy.view(N, T)
 
     def integrate_curve(self, y, t=None, dt=1.0, axis=-1):
         # If y is error, then we want to minimize the returned result
@@ -417,11 +431,11 @@ class DynamicsModel(pl.LightningModule):
 
 class SaveTestLogCallback(pl.Callback):
     def on_test_end(self, trainer, pl_module):
-        assert type(logger) == WandbLogger
-        save_dir = os.path.join(trainer.logger.experiment.dir, "test_log.pt")
-        if "test_log" in trainer.callback_metrics:
-            # Use torch.save in case we want to save pytorch tensors or modules
-            torch.save(trainer.callback_metrics["test_log"], save_dir)
+        if type(trainer.logger) == WandbLogger:
+            save_dir = os.path.join(trainer.logger.experiment.dir, "test_log.pt")
+            if "test_log" in trainer.callback_metrics:
+                # Use torch.save in case we want to save pytorch tensors or modules
+                torch.save(trainer.callback_metrics["test_log"], save_dir)
 
 
 def parse_misc():
@@ -445,20 +459,11 @@ def parse_misc():
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
+    parser.add_argument("--tags", type=str, nargs="*", default=None, help="Experiment tags")
     return parser
 
 
 if __name__ == "__main__":
-    from biases.systems.chain_pendulum import ChainPendulum
-    from biases.systems.rotor import Rotor
-    from biases.systems.magnet_pendulum import MagnetPendulum
-    from biases.systems.gyroscope import Gyroscope
-    from biases.models.constrained_hnn import CHNN, CHLC
-    from biases.models.constrained_lnn import CLNN, CLLC
-    from biases.models.hnn import HNN
-    from biases.models.lnn import LNN
-    from biases.models.nn import NN, DeltaNN
-    from biases.datasets import RigidBodyDataset
     from pytorch_lightning import Trainer
     from pytorch_lightning.loggers import WandbLogger
     from pytorch_lightning.callbacks import LearningRateLogger
@@ -487,13 +492,9 @@ if __name__ == "__main__":
     else:
         print("Directory ", exp_dir, " already exists")
 
-    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True)
+    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True, tags=hparams.tags)
     ckpt_dir = os.path.join(
-        logger.experiment.dir,
-        logger.name,
-        f"version_{logger.version}",
-        "checkpoints",
-        f"epoch={hparams.n_epochs - 1}.ckpt",
+        logger.experiment.dir, logger.name, f"version_{logger.version}", "checkpoints",
     )
 
     callbacks = [LearningRateLogger(), SaveTestLogCallback()]
