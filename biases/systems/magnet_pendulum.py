@@ -51,6 +51,7 @@ class MagnetPendulum(RigidBody):
         phid = (x*yd-y*xd)/rz**2
         thetad = ((xd*x*z+yd*y*z)/rz - rz*zd)/r**2
         angles = torch.stack([phi,theta],dim=-1)
+        angles = torch.from_numpy(np.unwrap(angles.numpy(),axis=0)).to(r.device,r.dtype)
         anglesd = torch.stack([phid,thetad],dim=-1)
         angles_omega = torch.stack([angles,anglesd],dim=1)
         return angles_omega
