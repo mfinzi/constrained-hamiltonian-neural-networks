@@ -72,7 +72,7 @@ class LNN(nn.Module, metaclass=Named):
         reg = eps * (qdot * qdot).sum(-1)
         return self.net(z) + reg
 
-    def integrate(self, z0: Tensor, ts: Tensor, tol=1e-4) -> Tensor:
+    def integrate(self, z0: Tensor, ts: Tensor, tol=1e-4, method="rk4") -> Tensor:
         """ Integrates an initial state forward in time according to the learned Lagrangian dynamics
 
         Note that self.q_ndim == n_dof x dimensionality of each degree of freedom
@@ -90,6 +90,6 @@ class LNN(nn.Module, metaclass=Named):
         assert z0.shape[-1] == self.q_ndim
         bs = z0.shape[0]
         self.nfe = 0
-        xvt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
+        xvt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method=method)
         xvt = xvt.permute(1, 0, 2)  # T x N x D -> N x T x D
         return xvt.reshape(bs, len(ts), *z0.shape[1:])

@@ -18,6 +18,8 @@ from torch import Tensor
 import wandb
 import PIL
 
+import numpy as np
+
 
 def str_to_class(classname):
     return getattr(sys.modules[__name__], classname)
@@ -36,84 +38,64 @@ def fig_to_img(fig):
 
 
 class DynamicsModel(pl.LightningModule):
-    def __init__(
-        self,
-        hparams: dict,
-        chunk_len: int,
-        batch_size: int,
-        body_class: str,
-        body_args: list,
-        dataset_class: str,
-        dt: float,
-        integration_time: float,
-        lr: float,
-        no_lr_sched: bool,
-        n_epochs: int,
-        n_hidden: int,
-        n_layers: int,
-        n_train: int,
-        n_val: int,
-        n_test: int,
-        network_class: str,
-        optimizer_class: str,
-        regen: bool,
-        seed: int,
-        tol: float,
-        weight_decay: float,
-        **unused_kwargs,
-    ):
+    def __init__(self, hparams: argparse.Namespace):
         super().__init__()
 
-        print("Unused kwargs:", unused_kwargs)
-
-        euclidean = network_class not in [
+        euclidean = hparams.network_class not in [
             "NN",
             "LNN",
             "HNN",
         ]  # TODO: try NN in euclideana
-        hparams.update(euclidean=euclidean)
+        vars(hparams).update(euclidean=euclidean)
 
-        body = str_to_class(body_class)(*body_args)
+        body = str_to_class(hparams.body_class)(*hparams.body_args)
 
-        dataset = str_to_class(dataset_class)(
-            n_systems=n_train + n_val + n_test,
-            regen=regen,
-            chunk_len=chunk_len,
+        dataset = str_to_class(hparams.dataset_class)(
+            n_systems=hparams.n_train + hparams.n_val + hparams.n_test,
+            regen=hparams.regen,
+            chunk_len=hparams.chunk_len,
             body=body,
-            dt=dt,
-            integration_time=integration_time,
+            dt=hparams.dt,
+            integration_time=hparams.integration_time,
             angular_coords=not euclidean,
         )
-        splits = {"train": n_train, "val": n_val, "test": n_test}
-        with FixedNumpySeed(seed):
+        splits = {
+            "train": hparams.n_train,
+            "val": hparams.n_val,
+            "test": hparams.n_test,
+        }
+        with FixedNumpySeed(hparams.seed):
             datasets = split_dataset(dataset, splits)
 
         net_cfg = {
             "dof_ndim": body.d if euclidean else body.D,
             "angular_dims": body.angular_dims,
-            "hidden_size": n_hidden,
-            "num_layers": n_layers,
+            "hidden_size": hparams.n_hidden,
+            "num_layers": hparams.n_layers,
             "wgrad": True,
         }
-        hparams.update(**net_cfg)
+        vars(hparams).update(**net_cfg)
 
-        model = str_to_class(network_class)(G=body.body_graph, **net_cfg)
+        model = str_to_class(hparams.network_class)(G=body.body_graph, **net_cfg)
 
         self.hparams = hparams
         self.model = model
         self.body = body
         self.datasets = datasets
         self.splits = splits
-        self.batch_sizes = {k: min(batch_size, v) for k, v in splits.items()}
+        self.batch_sizes = {
+            k: min(self.hparams.batch_size, v) for k, v in splits.items()
+        }
+        self.test_log = None
 
     def forward(self):
         raise RuntimeError("This module should not be called")
 
-    def rollout(self, z0, ts, tol):
+    def rollout(self, z0, ts, tol, method="rk4"):
         # z0: (N x 2 x n_dof x dimensionality of each degree of freedom) sized
         # ts: N x T Tensor representing the time points of true_zs
         # true_zs:  N x T x 2 x n_dof x d sized Tensor
-        pred_zs = self.model.integrate(z0, ts, tol=tol)
+        pred_zs = self.model.integrate(z0, ts, tol=tol, method=method)
         return pred_zs
 
     def trajectory_mse(self, pred_zts, true_zts):
@@ -123,7 +105,7 @@ class DynamicsModel(pl.LightningModule):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="rk4")
         loss = self.trajectory_mse(pred_zs, zts)
 
         logs = {
@@ -136,56 +118,113 @@ class DynamicsModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-        (z0, ts), zts = batch
-        # Assume all ts are equally spaced and dynamics is time translation invariant
-        ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
-        loss = self.trajectory_mse(pred_zs, zts)
-        return {"trajectory_mse": loss.detach()}
+        return self.test_step(batch, batch_idx, integration_factor=0.5)
 
     def validation_epoch_end(self, outputs):
         loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
-        log = {"validation/trajectory_mse": loss}
+        # Average errors across batches
+        rel_err_from_true = (
+            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_true = (
+            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        rel_err_from_pert = (
+            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_pert = (
+            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        int_rel_err_from_true = self.integrate_curve(
+            rel_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_true = self.integrate_curve(
+            abs_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_rel_err_from_pert = self.integrate_curve(
+            rel_err_from_pert.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_pert = self.integrate_curve(
+            abs_err_from_pert.log(), dt=self.hparams.dt
+        )
+
+        log = {
+            "validation/trajectory_mse": loss,
+            "validation/int_rel_err_from_true": int_rel_err_from_true,
+            "validation/int_abs_err_from_true": int_abs_err_from_true,
+            "validation/int_rel_err_from_pert": int_rel_err_from_pert,
+            "validation/int_abs_err_from_pert": int_abs_err_from_pert,
+        }
         return {"val_loss": loss, "log": log}
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, batch_idx, integration_factor=1.0):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams["tol"])
+        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="dopri5")
         loss = self.trajectory_mse(pred_zs, zts)
 
-        batch_trajectory_time = (ts[-1] - ts[0]).item()
-        dt = (ts[1] - ts[0]).item()
-        pred_zts, true_zts, _, rel_error, abs_error = self.compare_rollouts(
-            z0, 50 * batch_trajectory_time, dt, self.hparams["tol"]
+        (
+            pred_zts,
+            true_zts,
+            true_zts_pert,
+            rel_err_from_true,
+            abs_err_from_true,
+            rel_err_from_pert,
+            abs_err_from_pert,
+        ) = self.compare_rollouts(
+            z0, integration_factor * self.hparams.integration_time, self.hparams.dt, self.hparams.tol
         )
         return {
             "trajectory_mse": loss.detach(),
-            "rel_error": rel_error.detach(),
-            "abs_error": abs_error.detach(),
+            "rel_err_from_true": rel_err_from_true.detach(),
+            "abs_err_from_true": abs_err_from_true.detach(),
+            "rel_err_from_pert": rel_err_from_pert.detach(),
+            "abs_err_from_pert": abs_err_from_pert.detach(),
         }
 
     def test_epoch_end(self, outputs):
         loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
         # Average errors across batches
-        rel_error = collect_tensors("rel_error", outputs).mean((0, 1)).numpy()
-        abs_error = collect_tensors("abs_error", outputs).mean((0, 1)).numpy()
-        fig, ax = plt.subplots()
-        ax.plot(rel_error, label="Relative Error")
-        ax.plot(abs_error, label="Absolute Error")
-        ax.set(yscale="log", xlabel="Forward prediction (x 0.1 seconds)")
-        ax.legend()
-
-        # TODO: save arrays as temporary files and then wandb.save
-        # self.logger.experiment.save(rel_error)
-        # self.logger.experiment.save(abs_error)
+        rel_err_from_true = (
+            collect_tensors("rel_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_true = (
+            collect_tensors("abs_err_from_true", outputs).mean((0, 1))
+        ) + 1e-8
+        rel_err_from_pert = (
+            collect_tensors("rel_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        abs_err_from_pert = (
+            collect_tensors("abs_err_from_pert", outputs).mean((0, 1))
+        ) + 1e-8
+        # fig, ax = plt.subplots()
+        # ax.plot(rel_err_from_true, label="Relative Error")
+        # ax.plot(abs_err_from_true, label="Absolute Error")
+        # ax.set(yscale="log", xlabel=f"Forward prediction (x {self.hparams.dt:.1f} seconds)")
+        # ax.legend()
+        int_rel_err_from_true = self.integrate_curve(
+            rel_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_true = self.integrate_curve(
+            abs_err_from_true.log(), dt=self.hparams.dt
+        )
+        int_rel_err_from_pert = self.integrate_curve(
+            rel_err_from_pert.log(), dt=self.hparams.dt
+        )
+        int_abs_err_from_pert = self.integrate_curve(
+            abs_err_from_pert.log(), dt=self.hparams.dt
+        )
 
         log = {
             "test/trajectory_mse": loss,
-            "test/rollout_error": fig_to_img(fig),
+            # "test/rollout_error": fig_to_img(fig),
+            "test/int_rel_err_from_true": int_rel_err_from_true,
+            "test/int_abs_err_from_true": int_abs_err_from_true,
+            "test/int_rel_err_from_pert": int_rel_err_from_pert,
+            "test/int_abs_err_from_pert": int_abs_err_from_pert,
         }
-        return {"log": log}
+        return {"log": log, "test_log": log}
 
     def compare_rollouts(
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
@@ -193,17 +232,18 @@ class DynamicsModel(pl.LightningModule):
         # Ground truth is in double so we convert model to double
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
-        self.double()
         self.cpu()
-        z0 = z0.double().cpu()
+        self.double()
+        z0 = z0.cpu().double()
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
-        pred_zts = self.rollout(z0, ts, tol)
+        pred_zts = self.rollout(z0, ts, tol, "dopri5").cpu()
 
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
-        if not self.hparams["euclidean"]:  # convert to euclidean for body to integrate
-            z0 = body.body2globalCoords(z0).to(z0.device)
-            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest)).to(z0.device)
+        if not self.hparams.euclidean:  # convert to euclidean for body to integrate
+            z0 = body.body2globalCoords(z0)
+            flat_pred = body.body2globalCoords(pred_zts.reshape(bs * Nlong, *rest))
+
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
         # (bs, n_steps, 2, n_dof, d)
@@ -214,29 +254,44 @@ class DynamicsModel(pl.LightningModule):
 
         sq_diff_from_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
         sq_sum_from_true = (pred_zts + true_zts).pow(2).sum((2, 3, 4))
+        sq_diff_from_pert = (pred_zts - true_zts_pert).pow(2).sum((2, 3, 4))
+        sq_sum_from_pert = (pred_zts + true_zts_pert).pow(2).sum((2, 3, 4))
 
         # (bs, n_step)
-        rel_error = sq_diff_from_true.div(sq_sum_from_true).sqrt()
-        abs_error = sq_diff_from_true.sqrt()
+        rel_err_from_true = sq_diff_from_true.div(sq_sum_from_true).sqrt()
+        abs_err_from_true = sq_diff_from_true.sqrt()
+        rel_err_from_pert = sq_diff_from_pert.div(sq_sum_from_pert).sqrt()
+        abs_err_from_pert = sq_diff_from_pert.sqrt()
 
-        # TODO: compute error from pert
-        self.to(prev_device)
         self.to(prev_dtype)
-        return pred_zts, true_zts, true_zts_pert, rel_error, abs_error
+        self.to(prev_device)
+        return (
+            pred_zts,
+            true_zts,
+            true_zts_pert,
+            rel_err_from_true,
+            abs_err_from_true,
+            rel_err_from_pert,
+            abs_err_from_pert,
+        )
+
+    def integrate_curve(self, y, t=None, dt=1.0, axis=-1):
+        # If y is error, then we want to minimize the returned result
+        if torch.is_tensor(y):
+            y = y.detach().cpu().numpy()
+        return np.trapz(y, t, dx=dt, axis=axis)
 
     def configure_optimizers(self):
-        optimizer = getattr(torch.optim, self.hparams["optimizer_class"])(
+        optimizer = getattr(torch.optim, self.hparams.optimizer_class)(
             self.parameters(),
-            lr=self.hparams["lr"],
-            weight_decay=self.hparams["weight_decay"],
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay,
         )
-        if self.hparams["no_lr_sched"]:
+        if self.hparams.no_lr_sched:
             return optimizer
         else:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=self.hparams["n_epochs"],
-                eta_min=0.,
+                optimizer, T_max=self.hparams.n_epochs, eta_min=0.0,
             )
             return [optimizer], [scheduler]
 
@@ -267,43 +322,115 @@ class DynamicsModel(pl.LightningModule):
             shuffle=False,
         )
 
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser.add_argument("--batch-size", type=int, default=200, help="Batch size")
+        parser.add_argument(
+            "--body-class",
+            type=str,
+            help="Class name of physical system",
+            required=True,
+        )
+        parser.add_argument(
+            "--body-args",
+            help="Arguments to initialize physical system separated by spaces",
+            nargs="*",
+            type=int,
+            default=[],
+        )
+        parser.add_argument(
+            "--no-lr-sched",
+            action="store_true",
+            default=False,
+            help="Turn off cosine annealing for learing rate",
+        )
+        parser.add_argument(
+            "--chunk-len",
+            type=int,
+            default=5,
+            help="Length of each chunk of training trajectory",
+        )
+        parser.add_argument(
+            "--dataset-class",
+            type=str,
+            default="RigidBodyDataset",
+            help="Dataset class",
+        )
+        parser.add_argument(
+            "--dt", type=float, default=1e-1, help="Timestep size in generated data"
+        )
+        parser.add_argument(
+            "--integration-time",
+            type=float,
+            default=10.0,
+            help="Amount of time to integrate for in generating training trajectories",
+        )
+        parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+        parser.add_argument(
+            "--n-test", type=int, default=100, help="Number of test trajectories"
+        )
+        parser.add_argument(
+            "--n-train", type=int, default=800, help="Number of train trajectories"
+        )
+        parser.add_argument(
+            "--n-val", type=int, default=100, help="Number of validation trajectories"
+        )
+        parser.add_argument(
+            "--network-class",
+            type=str,
+            help="Dynamics network",
+            choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
+        )
+        parser.add_argument(
+            "--n-epochs", type=int, default=100, help="Number of training epochs"
+        )
+        parser.add_argument(
+            "--n-hidden", type=int, default=200, help="Number of hidden units"
+        )
+        parser.add_argument(
+            "--n-layers", type=int, default=3, help="Number of hidden layers"
+        )
+        parser.add_argument(
+            "--optimizer_class", type=str, default="AdamW", help="Optimizer",
+        )
+        parser.add_argument(
+            "--seed", type=int, default=0, help="Seed used to generate dataset",
+        )
+        parser.add_argument(
+            "--tol",
+            type=float,
+            default=1e-7,
+            help="Tolerance for numerical intergration",
+        )
+        parser.add_argument(
+            "--regen",
+            action="store_true",
+            default=False,
+            help="Forcibly regenerate training data",
+        )
+        parser.add_argument(
+            "--weight-decay", type=float, default=1e-4, help="Weight decay",
+        )
+        return parser
 
-def parse_cmdline():
+
+class SaveTestLogCallback(pl.Callback):
+    def on_test_end(self, trainer, pl_module):
+        assert type(logger) == WandbLogger
+        save_dir = os.path.join(trainer.logger.experiment.dir, "test_log.pt")
+        if "test_log" in trainer.callback_metrics:
+            # Use torch.save in case we want to save pytorch tensors or modules
+            torch.save(trainer.callback_metrics["test_log"], save_dir)
+
+
+def parse_misc():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch-size", type=int, default=200, help="Batch size")
-    parser.add_argument(
-        "--body-class", type=str, help="Class name of physical system", required=True,
-    )
-    parser.add_argument(
-        "--body-args",
-        help="Arguments to initialize physical system separated by spaces",
-        nargs="*",
-        type=int,
-        default=[]
-    )
-    parser.add_argument(
-        "--no-lr-sched",
-        action="store_true",
-        default=False,
-        help="Turn off cosine annealing for learing rate",
-    )
-    parser.add_argument(
-        "--chunk-len",
-        type=int,
-        default=5,
-        help="Length of each chunk of training trajectory",
-    )
-    parser.add_argument(
-        "--dataset-class", type=str, default="RigidBodyDataset", help="Dataset class",
-    )
     parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
         help="Debug code by running 1 batch of train, val, and test.",
-    )
-    parser.add_argument(
-        "--dt", type=float, default=1e-1, help="Timestep size in generated data"
     )
     parser.add_argument(
         "--exp-dir",
@@ -312,62 +439,13 @@ def parse_cmdline():
         help="Directory to save files from this experiment",
     )
     parser.add_argument(
-        "--integration-time",
-        type=float,
-        default=10.0,
-        help="Amount of time to integrate for in generating training trajectories",
-    )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument(
         "--n-epochs-per-val",
         type=int,
-        default=50,
+        default=10,
         help="Number of training epochs per validation step",
     )
-    parser.add_argument(
-        "--n-test", type=int, default=100, help="Number of test trajectories"
-    )
-    parser.add_argument(
-        "--n-train", type=int, default=800, help="Number of train trajectories"
-    )
-    parser.add_argument(
-        "--n-val", type=int, default=100, help="Number of validation trajectories"
-    )
-    parser.add_argument(
-        "--network-class",
-        type=str,
-        help="Dynamics network",
-        choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
-    )
-    parser.add_argument(
-        "--n-epochs", type=int, default=300, help="Number of training epochs"
-    )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
-    parser.add_argument(
-        "--n_hidden", type=int, default=200, help="Number of hidden units"
-    )
-    parser.add_argument(
-        "--n-layers", type=int, default=3, help="Number of hidden layers"
-    )
-    parser.add_argument(
-        "--optimizer_class", type=str, default="AdamW", help="Optimizer",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=0, help="Seed used to generate dataset",
-    )
-    parser.add_argument(
-        "--tol", type=float, default=1e-4, help="Tolerance for numerical intergration",
-    )
-    parser.add_argument(
-        "--regen",
-        action="store_true",
-        default=False,
-        help="Forcibly regenerate training data",
-    )
-    parser.add_argument(
-        "--weight-decay", type=float, default=0., help="Weight decay",
-    )
-    return parser.parse_args()
+    return parser
 
 
 if __name__ == "__main__":
@@ -385,47 +463,65 @@ if __name__ == "__main__":
     from pytorch_lightning.loggers import WandbLogger
     from pytorch_lightning.callbacks import LearningRateLogger
 
-    args = parse_cmdline()
-    args_dict = dict(vars(args))  # convert to dict with new copy
+    parser = parse_misc()
+    parser = DynamicsModel.add_model_specific_args(parser)
+    hparams = parser.parse_args()
 
-    dynamics_model = DynamicsModel(hparams=args_dict, **args_dict)
+    dynamics_model = DynamicsModel(hparams=hparams)
 
-    if args.exp_dir == "":
-        exp_dir = "/".join(
-            [
-                ".",
-                "experiments",
-                f"{dynamics_model.body.__repr__()}",
-                f"{args.network_class}",
-            ]
+    # create experiment directory
+    if hparams.exp_dir == "":
+        exp_dir = os.path.join(
+            os.getcwd(),
+            "experiments",
+            f"{dynamics_model.body.__repr__()}",
+            f"{hparams.network_class}",
         )
     else:
-        exp_dir = args.exp_dir
-
+        exp_dir = hparams.exp_dir
+    # Note that this args is shared with the model's hparams so it will be saved
+    vars(hparams).update(exp_dir=exp_dir)
     if not os.path.exists(exp_dir):
         os.makedirs(exp_dir)
         print("Directory ", exp_dir, " Created ")
     else:
         print("Directory ", exp_dir, " already exists")
 
-    with open(exp_dir + "/args.csv", "w") as csvfile:
+    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True)
+    ckpt_dir = os.path.join(
+        logger.experiment.dir,
+        logger.name,
+        f"version_{logger.version}",
+        "checkpoints",
+        f"epoch={hparams.n_epochs - 1}.ckpt",
+    )
+
+    callbacks = [LearningRateLogger(), SaveTestLogCallback()]
+    vars(hparams).update(
+        check_val_every_n_epoch=hparams.n_epochs_per_val,
+        fast_dev_run=hparams.debug,
+        gpus=hparams.n_gpus,
+        max_epochs=hparams.n_epochs,
+        ckpt_dir=ckpt_dir,
+    )
+
+    # record human-readable hparams as csv
+    with open(os.path.join(logger.experiment.dir, "args.csv"), "w") as csvfile:
+        args_dict = vars(hparams)  # convert to dict with new copy
         writer = csv.DictWriter(csvfile, fieldnames=args_dict.keys())
         writer.writeheader()
         writer.writerow(args_dict)
 
-    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns")
-    lr_logger = LearningRateLogger()
-    callbacks = [lr_logger]
-    trainer = Trainer(
-        check_val_every_n_epoch=args.n_epochs_per_val,
-        callbacks=callbacks,
-        default_root_dir=exp_dir,
-        fast_dev_run=args.debug,
-        gpus=args.n_gpus,
-        logger=logger,
-        max_epochs=args.n_epochs,
-    )
+    trainer = Trainer.from_argparse_args(hparams, callbacks=callbacks, logger=logger)
 
     trainer.fit(dynamics_model)
 
-    trainer.test()
+    with torch.no_grad():
+        trainer.test()
+
+    # ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
+    # probably remove logger when resuming since it's a finished experiment
+    # loaded_trainer = Trainer(
+    #    resume_from_checkpoint=ckpt_path, callbacks=callbacks, logger=logger
+    # )
+    # loaded_model = DynamicsModel.load_from_checkpoint(ckpt_path)

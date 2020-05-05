@@ -134,7 +134,7 @@ class HNN(nn.Module, metaclass=Named):
         self.nfe += 1
         return dz_dt
 
-    def integrate(self, z0, ts, tol=1e-4):
+    def integrate(self, z0, ts, tol=1e-4, method="rk4"):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
 
         Args:
@@ -158,7 +158,7 @@ class HNN(nn.Module, metaclass=Named):
 
         self.nfe = 0  # reset each forward pass
         qp0 = torch.cat([q0, p0], dim=-1)
-        qpt = odeint(self, qp0, ts, rtol=tol, method="rk4")
+        qpt = odeint(self, qp0, ts, rtol=tol, method=method)
         qpt = qpt.permute(1, 0, 2)  # T x N x D -> N x T x D
 
         if self.canonical:

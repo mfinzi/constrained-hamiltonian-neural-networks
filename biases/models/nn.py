@@ -50,7 +50,7 @@ class NN(nn.Module, metaclass=Named):
         self.nfe += 1
         return self.net(z)
 
-    def integrate(self, z0, ts, tol=1e-4):
+    def integrate(self, z0, ts, tol=1e-4, method="rk4"):
         """ Integrates an initial state forward in time according to the learned dynamics
 
         Args:
@@ -64,7 +64,7 @@ class NN(nn.Module, metaclass=Named):
         assert (z0.ndim == 3) and (ts.ndim == 1)
         bs = z0.shape[0]
         self.nfe = 0
-        zt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method="rk4")
+        zt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method=method)
         zt = zt.permute(1, 0, 2)  # T x N x D -> N x T x D
         return zt.reshape(bs, len(ts), *z0.shape[1:])
 

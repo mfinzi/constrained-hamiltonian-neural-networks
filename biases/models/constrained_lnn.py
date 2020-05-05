@@ -66,7 +66,7 @@ class CL(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         """ (bs,nd)"""
         raise NotImplementedError
 
-    def integrate(self, z0, ts, tol=1e-4):
+    def integrate(self, z0, ts, tol=1e-4, method="rk4"):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
 
         Assumes that z0 = [x0, xdot0] where x0 is in Cartesian coordinates
@@ -81,7 +81,7 @@ class CL(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         """
         bs = z0.shape[0]
         self.nfe = 0
-        zt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method="rk4").permute(1, 0, 2)
+        zt = odeint(self, z0.reshape(bs,-1), ts, rtol=tol, method=method).permute(1, 0, 2)
         return zt.reshape(bs, len(ts), 2, self.n_dof, self.dof_ndim)
         
 

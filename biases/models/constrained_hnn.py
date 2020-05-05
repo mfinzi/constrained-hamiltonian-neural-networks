@@ -136,7 +136,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
     def compute_V(self, x):
         raise NotImplementedError
 
-    def integrate(self, z0, ts, tol=1e-4,method="rk4"):
+    def integrate(self, z0, ts, tol=1e-4, method="rk4"):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
 
         Assumes that z0 = [x0, xdot0] where x0 is in Cartesian coordinates
