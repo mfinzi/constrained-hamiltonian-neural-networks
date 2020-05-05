@@ -109,7 +109,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
 
         Returns: Size N Hamiltonian Tensor
         """
-        assert (t.ndim == 0) and (z.ndim == 2)
+       # assert (t.ndim == 0) and (z.ndim == 2)
         assert z.size(-1) == 2 * self.n_dof * self.dof_ndim
 
         x, p = z.chunk(2, dim=-1)
@@ -136,7 +136,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
     def compute_V(self, x):
         raise NotImplementedError
 
-    def integrate(self, z0, ts, tol=1e-4):
+    def integrate(self, z0, ts, tol=1e-4,method="rk4"):
         """ Integrates an initial state forward in time according to the learned Hamiltonian dynamics
 
         Assumes that z0 = [x0, xdot0] where x0 is in Cartesian coordinates
@@ -159,9 +159,8 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
 
         self.nfe = 0
         xp0 = torch.stack([x0, p0], dim=1).reshape(bs,-1)
-        xpt = odeint(self, xp0, ts, rtol=tol, method="rk4")
+        xpt = odeint(self, xp0, ts, rtol=tol, method=method)
         xpt = xpt.permute(1, 0, 2)  # T x bs x D -> bs x T x D
-
         xpt = xpt.reshape(bs, len(ts), 2, self.n_dof, self.dof_ndim)
         xt, pt = xpt.chunk(2, dim=-3)
         # TODO: make Minv @ pt faster by L(L^T @ pt)
