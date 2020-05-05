@@ -26,21 +26,23 @@ class MagnetPendulum(RigidBody):
 
     def sample_initial_conditions(self, N):
         n = len(self.body_graph.nodes)
-        xv = 0.2 * torch.randn(N, 2, 1, 3)  # (N,2,n,d)
-        xv[:, 0, :, :] += torch.tensor([0.0, 0.0, -1.0])
-        xv[:, 0, :, :] /= (xv[:, 0, :, :] ** 2).sum(-1, keepdims=True).sqrt()
-
-        xv[:, 1, :, :] -= xv[:, 0, :, :] * (xv[:, 0, :, :] * xv[:, 1, :, :]).sum(
-            -1, keepdims=True
-        )
-        # xv[:,1,:,:]*= .1
+        phi =torch.rand(N)*2*np.pi
+        phid = .1*torch.randn(N)
+        theta = (4/5)*np.pi + .1*torch.randn(N)
+        thetad = 0.00*torch.randn(N)
+        angles_omega = torch.zeros(N,2,2)
+        angles_omega[:,0,0] = phi
+        angles_omega[:,1,0] = phid
+        angles_omega[:,0,1] = theta
+        angles_omega[:,1,1] = thetad
+        xv = self.body2globalCoords(angles_omega)
         return xv
     # def sample_initial_conditions(self,N):
     #     angles_vel = torch.randn(N,2,2,1)
     #     return self.body2globalCoords(angles_vel)
 
     def global2bodyCoords(self, global_pos_vel):
-        """ input (bs,2,1,3) output (bs,2,dangular=2,1) """
+        """ input (bs,2,1,3) output (bs,2,dangular=2) """
         bsT,_ , n, d = global_pos_vel.shape
         x,y,z = global_pos_vel[:,0,0,:].T
         xd,yd,zd = global_pos_vel[:,1,0,:].T
@@ -58,7 +60,7 @@ class MagnetPendulum(RigidBody):
 
         
     def body2globalCoords(self, angles_omega):
-        """ input (bs,2,dangular=2,1) output (bs,2,1,3) """
+        """ input (bs,2,dangular=2) output (bs,2,1,3) """
         bs,_,_ = angles_omega.shape
         euler_angles = torch.zeros(bs,2,3)
         euler_angles[:,:,:2] = angles_omega[...,:2]
