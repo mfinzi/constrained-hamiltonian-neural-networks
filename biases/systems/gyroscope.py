@@ -43,7 +43,7 @@ class Gyroscope(RigidBody):
         """ input: (bs,2,4,3) output: (bs,2,3)"""
         eulers = bodyX2comEuler(bodyX)[...,3:] # unwrap the euler angles
         eulers[:,0,:] = torch.from_numpy(np.unwrap(eulers[:,0,:].numpy(),axis=0))
-        return eulers
+        return eulers.to(bodyX.device,bodyX.dtype)
 
     def potential(self, x):
         """ Gravity potential """

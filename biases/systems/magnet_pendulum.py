@@ -62,7 +62,7 @@ class MagnetPendulum(RigidBody):
     def body2globalCoords(self, angles_omega):
         """ input (bs,2,dangular=2) output (bs,2,1,3) """
         bs,_,_ = angles_omega.shape
-        euler_angles = torch.zeros(bs,2,3)
+        euler_angles = torch.zeros(bs,2,3,device=angles_omega.device,dtype=angles_omega.dtype)
         euler_angles[:,:,:2] = angles_omega[...,:2]
         # To treat z axis of ZXZ euler angles as spherical coordinates
         # simply set (alpha,beta,gamma) = (phi+pi/2,theta,0)
