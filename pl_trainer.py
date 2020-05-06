@@ -29,7 +29,7 @@ from biases.models.hnn import HNN
 from biases.models.lnn import LNN
 from biases.models.nn import NN, DeltaNN
 from biases.datasets import RigidBodyDataset
-
+from biases.systems.rigid_body import rigid_Phi,project_onto_constraints
 
 def str_to_class(classname):
     return getattr(sys.modules[__name__], classname)
@@ -257,7 +257,8 @@ class DynamicsModel(pl.LightningModule):
         # (bs, n_steps, 2, n_dof, d)
         true_zts = body.integrate(z0, ts, tol=tol)
 
-        perturbation = pert_eps * torch.randn_like(z0)
+        perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
+        z0_perterbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-7) #project
         pert_zts = body.integrate(z0 + perturbation, ts, tol=tol)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
