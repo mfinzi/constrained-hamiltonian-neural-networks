@@ -258,8 +258,8 @@ class DynamicsModel(pl.LightningModule):
         true_zts = body.integrate(z0, ts, tol=tol)
 
         perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
-        z0_perterbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-7) #project
-        pert_zts = body.integrate(z0 + perturbation, ts, tol=tol)
+        z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-7) #project
+        pert_zts = body.integrate(z0_perturbed, ts, tol=tol)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
         sq_diff_pert_true = (true_zts - pert_zts).pow(2).sum((2, 3, 4))
