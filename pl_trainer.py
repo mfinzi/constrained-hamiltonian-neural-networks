@@ -400,7 +400,7 @@ class DynamicsModel(pl.LightningModule):
             choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
         )
         parser.add_argument(
-            "--n-epochs", type=int, default=100, help="Number of training epochs"
+            "--n-epochs", type=int, default=2000, help="Number of training epochs"
         )
         parser.add_argument(
             "--n-hidden", type=int, default=200, help="Number of hidden units"
@@ -458,7 +458,7 @@ def parse_misc():
     parser.add_argument(
         "--n-epochs-per-val",
         type=int,
-        default=25,
+        default=100,
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
@@ -499,8 +499,10 @@ if __name__ == "__main__":
     ckpt_dir = os.path.join(
         logger.experiment.dir, logger.name, f"version_{logger.version}", "checkpoints",
     )
-
-    callbacks = [LearningRateLogger(), SaveTestLogCallback()]
+    if hparams.no_lr_sched:
+        callbacks = [SaveTestLogCallback()]
+    else:
+        callbacks = [LearningRateLogger(), SaveTestLogCallback()]
     vars(hparams).update(
         check_val_every_n_epoch=hparams.n_epochs_per_val,
         fast_dev_run=hparams.debug,
