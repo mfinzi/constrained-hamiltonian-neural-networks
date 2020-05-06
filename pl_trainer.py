@@ -26,7 +26,7 @@ from biases.systems.gyroscope import Gyroscope
 from biases.models.constrained_hnn import CHNN, CHLC
 from biases.models.constrained_lnn import CLNN, CLLC
 from biases.models.hnn import HNN
-from biases.models.lnn import LNN
+from biases.models.lnn import LNN, DeLaN
 from biases.models.nn import NN, DeltaNN
 from biases.datasets import RigidBodyDataset
 from biases.systems.rigid_body import rigid_Phi,project_onto_constraints
@@ -59,6 +59,7 @@ class DynamicsModel(pl.LightningModule):
             "NN",
             "LNN",
             "HNN",
+            "DeLaN",
         ]  # TODO: try NN in euclideana
         vars(hparams).update(euclidean=euclidean)
 
@@ -398,7 +399,7 @@ class DynamicsModel(pl.LightningModule):
             "--network-class",
             type=str,
             help="Dynamics network",
-            choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
+            choices=["NN", "DeltaNN", "HNN", "LNN", "DeLaN", "CHNN", "CLNN", "CHLC", "CLLC"],
         )
         parser.add_argument(
             "--n-epochs", type=int, default=2000, help="Number of training epochs"
