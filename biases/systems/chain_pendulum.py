@@ -79,7 +79,7 @@ class ChainPendulum(RigidBody):
         #z = torch.randn(N,2,n,2)
         z[:,0] += .2*torch.randn(N,n,2)
         z[:,1] = .5*z[:,1] + .4*torch.randn(N,n,2)
-        return project_onto_constraints(self.body_graph,z,tol=1e-6)
+        return project_onto_constraints(self.body_graph,z)
         
         # return 
 
