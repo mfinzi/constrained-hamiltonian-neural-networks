@@ -2,21 +2,23 @@ import torch
 import networkx as nx
 import numpy as np
 from oil.utils.utils import export
-from biases.systems.rigid_body import RigidBody, BodyGraph
+from biases.systems.rigid_body import RigidBody, BodyGraph, project_onto_constraints
 from biases.animation import Animation
 
 
 @export
 class ChainPendulum(RigidBody):
     d=2
-    def __init__(self, links=2, beams=False, m=1, l=1):
+    def __init__(self, links=2, beams=False, m=None, l=None):
         self.body_graph = BodyGraph()#nx.Graph()
         self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
         assert not beams, "beams temporarily not supported"
-        self.body_graph.add_extended_nd(0, m=m, d=0,tether=(torch.zeros(2),l))
+        ms = [.6+.8*np.random.rand() for _ in range(links)] if m is None else links*[m]
+        ls = [.6+.8*np.random.rand() for _ in range(links)] if l is None else links*[l]
+        self.body_graph.add_extended_nd(0, m=ms.pop(), d=0,tether=(torch.zeros(2),ls.pop()))
         for i in range(1, links):
-            self.body_graph.add_extended_nd(i, m=m, d=0)
-            self.body_graph.add_edge(i - 1, i, l=l)
+            self.body_graph.add_extended_nd(i, m=ms.pop(), d=0)
+            self.body_graph.add_edge(i - 1, i, l=ls.pop())
         self.D =self.n = links
         self.angular_dims = range(links)
 
@@ -31,9 +33,7 @@ class ChainPendulum(RigidBody):
         global_position_velocity += self.joint2cartesian(length, angles_omega[..., 0])
         pvs[:, :, 0] = global_position_velocity
         for (_, j), length in nx.get_edge_attributes(self.body_graph, "l").items():
-            global_position_velocity += self.joint2cartesian(
-                length, angles_omega[..., j]
-            )
+            global_position_velocity += self.joint2cartesian(length, angles_omega[..., j])
             pvs[:, :, j] = global_position_velocity
         return pvs
 
@@ -75,7 +75,13 @@ class ChainPendulum(RigidBody):
     def sample_initial_conditions(self, N):
         n = len(self.body_graph.nodes)
         angles_and_angvel = torch.randn(N, 2, n)  # (N,2,n)
-        return self.body2globalCoords(angles_and_angvel)
+        z = self.body2globalCoords(angles_and_angvel)
+        #z = torch.randn(N,2,n,2)
+        z[:,0] += .2*torch.randn(N,n,2)
+        z[:,1] = .5*z[:,1] + .4*torch.randn(N,n,2)
+        return project_onto_constraints(self.body_graph,z,tol=1e-5)
+        
+        # return 
 
     def potential(self, x):
         """ Gravity potential """
