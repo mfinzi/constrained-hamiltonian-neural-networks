@@ -325,7 +325,7 @@ def project_onto_constraints(G,z,tol=1e-5):
             scale = (z**2).mean().sqrt()
             z += diff.clamp(min=-scale/2,max=scale/2)
             i+=1
-            assert i<500, "Newton-Raphson Constraint projection failed to converge"
+            if i>500: raise OverflowError("Newton-Raphson Constraint projection failed to converge")
         #print(f"converged in {i} iterations")
     return z
 
