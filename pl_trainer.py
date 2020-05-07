@@ -238,11 +238,10 @@ class DynamicsModel(pl.LightningModule):
     def compare_rollouts(
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
     ):
-        # Ground truth is in double so we convert model to double
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
-        pred_zts = self.rollout(z0, ts, tol, "dopri5")#.cpu()
+        pred_zts = self.rollout(z0, ts, tol, "dopri5")
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
         if not self.hparams.euclidean:  # convert to euclidean for body to integrate
@@ -281,7 +280,6 @@ class DynamicsModel(pl.LightningModule):
         )
 
     def true_energy(self, zs):
-        zs = zs.double()
         N, T = zs.shape[:2]
         q, qdot = zs.chunk(2, dim=2)
         p = self.body.M @ qdot
