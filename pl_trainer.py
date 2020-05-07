@@ -98,9 +98,8 @@ class DynamicsModel(pl.LightningModule):
         self.body = body
         self.datasets = datasets
         self.splits = splits
-        self.batch_sizes = {
-            k: min(self.hparams.batch_size, v) for k, v in splits.items()
-        }
+        self.batch_sizes = dict(splits)
+        self.batch_sizes["train"] = min(self.hparams.batch_size, self.batch_sizes["train"])
         self.test_log = None
 
     def forward(self):
