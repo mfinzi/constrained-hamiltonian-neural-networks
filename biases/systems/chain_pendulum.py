@@ -24,8 +24,8 @@ class ChainPendulum(RigidBody):
         d = 2
         n = len(self.body_graph.nodes)
         N = angles_omega.shape[0]
-        pvs = torch.zeros(N, 2, n, d)
-        global_position_velocity = torch.zeros(N, 2, d)
+        pvs = torch.zeros(N, 2, n, d,device=angles_omega.device,dtype=angles_omega.dtype)
+        global_position_velocity = torch.zeros(N, 2, d,device=angles_omega.device,dtype=angles_omega.dtype)
         length = self.body_graph.nodes[0]["tether"][1]
         global_position_velocity[:, 0, :] = self.body_graph.nodes[0]["tether"][0][None]
         global_position_velocity += self.joint2cartesian(length, angles_omega[..., 0])
@@ -38,7 +38,7 @@ class ChainPendulum(RigidBody):
         return pvs
 
     def joint2cartesian(self, length, angle_omega):
-        position_vel = torch.zeros(angle_omega.shape[0], 2, 2)
+        position_vel = torch.zeros(angle_omega.shape[0], 2, 2,device=angle_omega.device,dtype=angle_omega.dtype)
         position_vel[:, 0, 0] = length * angle_omega[:, 0].sin()
         position_vel[:, 1, 0] = length * angle_omega[:, 0].cos() * angle_omega[:, 1]
         position_vel[:, 0, 1] = -length * angle_omega[:, 0].cos()
@@ -61,7 +61,7 @@ class ChainPendulum(RigidBody):
         angles_omega = torch.zeros(
             *bsT2, n, device=global_pos_vel.device, dtype=global_pos_vel.dtype
         )
-        start_position_velocity = torch.zeros(*bsT2, d)
+        start_position_velocity = torch.zeros(*bsT2, d,device=angles_omega.device,dtype=angles_omega.dtype)
         start_position_velocity[..., 0, :] = self.body_graph.nodes[0]["tether"][0][None]
         rel_pos_vel = global_pos_vel[..., 0, :] - start_position_velocity
         angles_omega[..., 0] += self.cartesian2angle(rel_pos_vel)

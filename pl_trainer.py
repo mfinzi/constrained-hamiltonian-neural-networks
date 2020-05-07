@@ -241,12 +241,8 @@ class DynamicsModel(pl.LightningModule):
         # Ground truth is in double so we convert model to double
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
-        self.cpu()
-        self.double()
-        z0 = z0.cpu().double()
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
-        pred_zts = self.rollout(z0, ts, tol, "dopri5").cpu()
-
+        pred_zts = self.rollout(z0, ts, tol, "dopri5")#.cpu()
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
         if not self.hparams.euclidean:  # convert to euclidean for body to integrate
@@ -257,7 +253,6 @@ class DynamicsModel(pl.LightningModule):
 
         # (bs, n_steps, 2, n_dof, d)
         true_zts = body.integrate(z0, ts, tol=tol)
-
         perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
         z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-7) #project
         pert_zts = body.integrate(z0_perturbed, ts, tol=tol)

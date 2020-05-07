@@ -35,7 +35,8 @@ class Rotor(RigidBody):
         """ input: (bs,2,4,3) output: (bs,2,6)"""
         comEuler = bodyX2comEuler(bodyX)
         #unwrap euler angles for continuous trajectories
-        comEuler[:,0,3:] = torch.from_numpy(np.unwrap(comEuler[:,0,3:],axis=0))
+        unwrapped_angles = torch.from_numpy(np.unwrap(comEuler[:,0,3:],axis=0))
+        comEuler[:,0,3:] = unwrapped_angles.to(bodyX.device,bodyX.dtype)
         return comEuler
 
     # @property
