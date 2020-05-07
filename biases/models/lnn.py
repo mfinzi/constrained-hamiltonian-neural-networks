@@ -18,6 +18,7 @@ class LNN(nn.Module, metaclass=Named):
         num_layers: int = 3,
         angular_dims: Tuple = tuple(),
         wgrad: bool = True,
+        delan: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -27,16 +28,17 @@ class LNN(nn.Module, metaclass=Named):
         self.q_ndim = dof_ndim
 
         # We parameterize angular dims in terms of cos(theta), sin(theta)
-        chs = [2 * self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
-        self.net = nn.Sequential(
-            CosSin(self.q_ndim, angular_dims, only_q=False),
-            *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
-                for i in range(num_layers)
-            ],
-            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
-            Reshape(-1)
-        )
+        if not delan:
+            chs = [2 * self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
+            self.net = nn.Sequential(
+                CosSin(self.q_ndim, angular_dims, only_q=False),
+                *[
+                    FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                    for i in range(num_layers)
+                ],
+                Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+                Reshape(-1)
+            )
         print("LNN currently assumes time independent Lagrangian")
         self.angular_dims = angular_dims
         self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
@@ -93,3 +95,61 @@ class LNN(nn.Module, metaclass=Named):
         xvt = odeint(self, z0.reshape(bs, -1), ts, rtol=tol, method=method)
         xvt = xvt.permute(1, 0, 2)  # T x N x D -> N x T x D
         return xvt.reshape(bs, len(ts), *z0.shape[1:])
+
+
+@export
+class DeLaN(LNN):
+    def __init__(
+        self,
+        G,
+        dof_ndim: int = 1,
+        hidden_size: int = 200,
+        num_layers: int = 3,
+        angular_dims: Tuple = tuple(),
+        wgrad: bool = True,
+        **kwargs
+    ):
+        super().__init__(G=G, dof_ndim=dof_ndim, hidden_size=hidden_size,
+                num_layers=num_layers, angular_dims=angular_dims, wgrad=wgrad,
+                delan=True, **kwargs)
+        self.nfe = 0
+
+        self.q_ndim = dof_ndim
+        self.angular_dims = angular_dims
+
+        # We parameterize angular dims in terms of cos(theta), sin(theta)
+        chs = [self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
+        self.potential_net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=True),
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+            Reshape(-1)
+        )
+        print("HNN currently assumes potential energy depends only on q")
+        print("HNN currently assumes time independent Hamiltonian")
+
+        self.mass_net = nn.Sequential(
+            CosSin(self.q_ndim, angular_dims, only_q=True),
+            *[
+                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                for i in range(num_layers)
+            ],
+            Linear(
+                chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True
+            ),
+            Reshape(-1, self.q_ndim, self.q_ndim)
+        )
+        self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
+
+    def net(self, z, eps=1e-1):
+        assert z.size(-1) == 2 * self.q_ndim
+        q, qdot = z.chunk(2, dim=-1)
+
+        V = self.potential_net(q)
+        M = self.mass_net(q)
+        reg = eps * (qdot * qdot).sum(-1)
+        T = (qdot * (M @ qdot.unsqueeze(-1)).squeeze(-1)).sum(-1) / 2.0 + reg
+        return T - V
