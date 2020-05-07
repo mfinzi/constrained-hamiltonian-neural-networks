@@ -47,7 +47,7 @@ def euler2frame(euler_and_dot):
     omega = (eulerdot2omega(euler)@eulerdot.unsqueeze(-1)).squeeze(-1)
     # omega = (angular velocity in the body frame)
     RT_Rdot = cross_matrix(omega) 
-    R = torch.from_numpy(Rotation.from_euler('ZXZ',euler.data.numpy()).as_matrix()).to(euler.device,euler.dtype)
+    R = torch.from_numpy(Rotation.from_euler('ZXZ',euler.data.cpu().numpy()).as_matrix()).to(euler.device,euler.dtype)
     Rdot = R@RT_Rdot
     return torch.stack([R,Rdot],dim=1).permute(0,1,3,2) # (bs,2,d,n->bs,2,n,d)
 
@@ -58,7 +58,7 @@ def frame2euler(frame_pos_vel):
     R,Rdot = frame_pos_vel.permute(1,0,3,2)#frame_pos_vel[:,0,1:].permute(0,2,1)-frame_pos_vel[:,0,0].unsqueeze(-1) #(bs,3,3)
     #Rdot = frame_pos_vel[:,1,1:].permute(0,2,1)-frame_pos_vel[:,1,0].unsqueeze(-1) #(bs,3,3)
     omega = uncross_matrix(R.permute(0,2,1)@Rdot) #angular velocity in body frame Omega = RTRdot
-    angles = torch.from_numpy(np.ascontiguousarray(Rotation.from_matrix(R.data.numpy()).as_euler('ZXZ'))).to(R.device,R.dtype)
+    angles = torch.from_numpy(np.ascontiguousarray(Rotation.from_matrix(R.data.cpu().numpy()).as_euler('ZXZ'))).to(R.device,R.dtype)
     eulerdot = torch.solve(omega.unsqueeze(-1),eulerdot2omega(angles))[0].squeeze(-1)
     return torch.stack([angles,eulerdot],dim=1)
 
