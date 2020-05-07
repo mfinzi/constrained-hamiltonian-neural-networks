@@ -97,13 +97,16 @@ class RigidBody(object, metaclass=Named):
         return self._minv
 
     def to(self, device=None, dtype=None):
+        self.M
+        self.Minv
         self._m = self._m.to(device, dtype)
         self._minv = self._minv.to(device, dtype)
 
     def DPhi(self, zp):
         bs,n,d = zp.shape[0],self.n,self.d
         x,p = zp.reshape(bs,2,n,d).unbind(dim=1)
-        Minv = self.Minv.to(zp.device,dtype=zp.dtype)
+        self.to(zp.device,zp.dtype)
+        Minv = self.Minv#.to(zp.device,dtype=zp.dtype)
         v = Minv@p
         DPhi = rigid_DPhi(self.body_graph, x, v)
         # Convert d/dv to d/dp
@@ -160,14 +163,16 @@ class RigidBody(object, metaclass=Named):
     def integrate(self, z0, T, tol=1e-7,method="dopri5"):  # (x,v) -> (x,p) -> (x,v)
         """ Integrate system from z0 to times in T (e.g. linspace(0,10,100))"""
         bs = z0.shape[0]
-        z0 = z0.double()
+        z0 = z0#.double()
+        M = self.M.to(z0.device,z0.dtype)
+        Minv = self.Minv.to(z0.device,z0.dtype)
         xp = torch.stack(
-            [z0[:, 0], self.M @ z0[:, 1]], dim=1
+            [z0[:, 0], M @ z0[:, 1]], dim=1
         ).reshape(bs, -1)
         with torch.no_grad():
             xpt = odeint(self.dynamics(), xp, T.double(), rtol=tol, method=method)
         xps = xpt.permute(1, 0, 2).reshape(bs, len(T), *z0.shape[1:])
-        xvs = torch.stack([xps[:, :, 0], self.Minv @ xps[:, :, 1]], dim=2)
+        xvs = torch.stack([xps[:, :, 0], Minv @ xps[:, :, 1]], dim=2)
         return xvs.to(z0.device)
 
     def animate(self, zt):
