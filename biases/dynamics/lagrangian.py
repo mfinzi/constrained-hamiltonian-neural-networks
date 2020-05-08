@@ -69,6 +69,45 @@ def LagrangianFlow(
     return odeint(dynamics, z0, T, rtol=1e-6).permute(1, 0, 2)
 
 @export
+class DeLanDynamics(nn.Module):
+    """ Defines the dynamics given a Lagrangian.
+
+    Args:
+        V: A callable function that takes in q and returns V(q)
+        M: A callable function M(q,v) = p
+        Minv: A callable function Minv(q,p) = v
+        wgrad: If True, the dynamics can be backproped.
+    """
+
+    def __init__(self, V, M,Minv, wgrad: bool = True):
+        super().__init__()
+        self.V = V
+        self.M = M
+        self.Minv = Minv
+        self.wgrad = wgrad
+
+    def forward(self, t: Tensor, z: Tensor) -> Tensor:
+        """ Computes a batch of `NxD` time derivatives of the state `z` at time `t`
+        Args:
+            t: Scalar Tensor of the current time
+            z: N x 2D Tensor of the N different states in 2D dimensions
+        """
+        assert (t.ndim == 0) and (z.ndim == 2)
+        D = z.shape[-1] // 2
+        with torch.enable_grad():
+            q = z[..., :D]
+            v = z[..., D:]
+            v = v + torch.zeros_like(v,requires_grad=True)
+            q = q + torch.zeros_like(q, requires_grad=True)
+            T = (v*self.M(q,v)).sum()/2
+            V = self.V(q).sum()
+            Fq = grad(T-V,q,create_graph=True)[0]
+            Fv = -grad((v.detach()*Fq).sum(),v,create_graph=True)[0]
+            a = self.Minv(q,Fq+Fv)
+            dynamics = torch.cat([v, a], dim=-1)
+        return dynamics
+
+@export
 class ConstrainedLagrangianDynamics(nn.Module):
     """ Defines the Constrained Hamiltonian dynamics given a Hamiltonian and
     gradients of constraints.
