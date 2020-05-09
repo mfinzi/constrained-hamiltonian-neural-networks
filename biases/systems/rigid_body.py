@@ -218,7 +218,7 @@ def dist_constraints_DPhi(G,x,v):
     # Fixed distance between a point and a fixed point in space
     for cid, (ki, (pos,_)) in enumerate(tether_constrs.items()):
         i = G.key2id[ki]
-        ci = pos[None].to(x.device)
+        ci = pos[None].to(x.device,x.dtype)
         DPhi[:,0, i, :, 0,cid+p2ps] = 2 * (x[:, i] - ci)
         DPhi[:,0, i, :, 1,cid+p2ps] = 2 * v[:, i]
         DPhi[:,1, i, :, 1,cid+p2ps] = 2 * (x[:, i] - ci)
@@ -242,8 +242,8 @@ def joint_constraints_DPhi(G,x,v):
     jid = 0
     for ((ki,kj),(c1,c2)) in edge_joints.items():
         i,j = G.key2id[ki],G.key2id[kj]
-        c1t = torch.cat([1-c1.sum()[None],c1])
-        c2t = torch.cat([1-c2.sum()[None],c2])
+        c1t = torch.cat([1-c1.sum()[None],c1]).to(x.device,x.dtype)
+        c2t = torch.cat([1-c2.sum()[None],c2]).to(x.device,x.dtype)
         di = G.nodes[ki]['d']
         dj = G.nodes[kj]['d']
         for k in range(d):# (bs, di+1, d, d)
@@ -254,8 +254,8 @@ def joint_constraints_DPhi(G,x,v):
         jid += 1
         if 'rotation_axis' in G[ki][kj]:
             ui,uj = G[ki][kj]['rotation_axis']
-            uit = torch.cat([-ui.sum()[None],ui])
-            ujt = torch.cat([-uj.sum()[None],uj])
+            uit = torch.cat([-ui.sum()[None],ui]).to(x.device,x.dtype)
+            ujt = torch.cat([-uj.sum()[None],uj]).to(x.device,x.dtype)
             for k in range(d):
                 DPhi[:,0,i:i+1+di,k,0,jid,k] = uit[None]
                 DPhi[:,0,j:j+1+dj,k,0,jid,k] = -ujt[None]
@@ -271,7 +271,7 @@ def joint_constraints_DPhi(G,x,v):
     # Joints connecting a body to a fixed point in space
     for jid2, (ki,(c1,_)) in enumerate(node_joints.items()):
         i = G.key2id[ki]
-        c1t = torch.cat([1-c1.sum()[None],c1])
+        c1t = torch.cat([1-c1.sum()[None],c1]).to(x.device,x.dtype)
         di = G.nodes[ki]['d']
         for k in range(d):# (bs, di+1, d, d)
             DPhi[:,0,i:i+1+di,k,0,jid2+jid,k] = c1t[None]
@@ -325,7 +325,7 @@ def project_onto_constraints(G,z,tol=1e-5):
             scale = (z**2).mean().sqrt()
             z += diff.clamp(min=-scale/2,max=scale/2)
             i+=1
-            assert i<500, "Newton-Raphson Constraint projection failed to converge"
+            if i>500: raise OverflowError("Newton-Raphson Constraint projection failed to converge")
         #print(f"converged in {i} iterations")
     return z
 
@@ -354,7 +354,7 @@ def dist_constraints(G,x,v):
     # Fixed distance between a point and a fixed point in space
     for cid, (ki, (pos,lij)) in enumerate(tether_constrs.items()):
         i = G.key2id[ki]
-        ci = pos[None].to(x.device)
+        ci = pos[None].to(x.device,x.dtype)
         xdiff = x[:, i] - ci
         Phi[:, 0,cid+p2ps] = ((xdiff)**2).sum(-1) - lij**2
         Phi[:, 1,cid+p2ps] = 2*(xdiff*v[:,i]).sum(-1)
@@ -373,8 +373,8 @@ def joint_constraints(G,x,v):
     jid=0
     for (ki,kj),(c1,c2) in edge_joints.items():
         i,j = G.key2id[ki],G.key2id[kj]
-        c1t = torch.cat([1-c1.sum()[None],c1])
-        c2t = torch.cat([1-c2.sum()[None],c2])
+        c1t = torch.cat([1-c1.sum()[None],c1]).to(x.device,x.dtype)
+        c2t = torch.cat([1-c2.sum()[None],c2]).to(x.device,x.dtype)
         di = G.nodes[ki]['d']
         dj = G.nodes[kj]['d']
         Phi[:,0,jid,:] = (x[:,i:i+di+1,:]*c1t[None,:,None]).sum(1) - (x[:,j:j+dj+1,:]*c2t[None,:,None]).sum(1)
@@ -382,16 +382,16 @@ def joint_constraints(G,x,v):
         jid += 1
         if 'rotation_axis' in G[ki][kj]:
             ui,uj = G[ki][kj]['rotation_axis']
-            uit = torch.cat([-ui.sum()[None],ui])
-            ujt = torch.cat([-uj.sum()[None],uj])
+            uit = torch.cat([-ui.sum()[None],ui]).to(x.device,x.dtype)
+            ujt = torch.cat([-uj.sum()[None],uj]).to(x.device,x.dtype)
             Phi[:,0,jid,:] = (x[:,i:i+di+1,:]*uit[None,:,None]).sum(1) - (x[:,j:j+dj+1,:]*ujt[None,:,None]).sum(1)
             Phi[:,1,jid,:] = (v[:,i:i+di+1,:]*uit[None,:,None]).sum(1) - (v[:,j:j+dj+1,:]*ujt[None,:,None]).sum(1)
             jid+=1
     # Joints connecting a body to a fixed point in space
     for jid2, (ki,(c1,c2)) in enumerate(node_joints.items()):
         i = G.key2id[ki]
-        c1t = torch.cat([1-c1.sum()[None],c1])
+        c1t = torch.cat([1-c1.sum()[None],c1]).to(x.device,x.dtype)
         di = G.nodes[ki]['d']
-        Phi[:,0,jid2+jid,:] = (x[:,i:i+di+1,:]*c1t[None,:,None]).sum(1) - c2[None]
+        Phi[:,0,jid2+jid,:] = (x[:,i:i+di+1,:]*c1t[None,:,None]).sum(1) - c2[None].to(x.device,x.dtype)
         Phi[:,1,jid2+jid,:] = (v[:,i:i+di+1,:]*c1t[None,:,None]).sum(1)
     return Phi.reshape(bs,2,-1)

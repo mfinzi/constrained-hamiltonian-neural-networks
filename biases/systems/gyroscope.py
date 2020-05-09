@@ -25,7 +25,8 @@ class Gyroscope(RigidBody):
         comEulers[:,1,3:] *=.5
         comEulers[:,1,5] = 6
         bodyX = comEuler2bodyX(comEulers)
-        return project_onto_constraints(self.body_graph,bodyX)
+        try: return project_onto_constraints(self.body_graph,bodyX,tol=1e-5)
+        except OverflowError: return self.sample_initial_conditions(N)
 
     def body2globalCoords(self,eulers):
         """ input: (bs,2,3) output: (bs,2,4,3) """
@@ -34,7 +35,7 @@ class Gyroscope(RigidBody):
         bodyX = comEuler2bodyX(comEulers)
         # need to offset x,v so that joint is stationary
         # pos joint = 
-        body_attachment = self.body_graph.nodes[0]['joint'][0]
+        body_attachment = self.body_graph.nodes[0]['joint'][0].to(eulers.device,eulers.dtype)
         ct = torch.cat([1-body_attachment.sum()[None],body_attachment])
         global_coords_attachment_point = (bodyX*ct[:,None]).sum(-2,keepdims=True) #(bs,2,3)
         return bodyX-global_coords_attachment_point

@@ -4,7 +4,7 @@ from oil.utils.utils import Eval
 from oil.model_trainers import Trainer
 from oil.utils.utils import export
 import numpy as np
-
+from biases.systems.rigid_body import project_onto_constraints
 
 @export
 class IntegratedDynamicsTrainer(Trainer):
@@ -33,14 +33,14 @@ class IntegratedDynamicsTrainer(Trainer):
         super().logStuff(step, minibatch)
 
     def test_rollouts(self, angular_to_euclidean=False, pert_eps=1e-4):
-        self.model.cpu().double()
+        #self.model.cpu().double()
         dataloader = self.dataloaders["test"]
         rel_errs = []
         pert_rel_errs = []
         with Eval(self.model), torch.no_grad():
             for mb in dataloader:
                 z0, T = mb[0]  # assume timesteps evenly spaced for now
-                z0 = z0.cpu().double()
+                #z0 = z0.cpu().double()
                 T = T[0]
                 dT = (T[-1] - T[0]) / len(T)
                 long_T = dT * torch.arange(50 * len(T)).to(z0.device, z0.dtype)
@@ -50,20 +50,18 @@ class IntegratedDynamicsTrainer(Trainer):
                 body = dataloader.dataset.body
                 if angular_to_euclidean:
                     z0 = body.body2globalCoords(z0)
-                    flat_pred = body.body2globalCoords(
-                        zt_pred.reshape(bs * Nlong, *rest)
-                    )
+                    flat_pred = body.body2globalCoords(zt_pred.reshape(bs * Nlong, *rest))
                     zt_pred = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
                 zt = dataloader.dataset.body.integrate(z0, long_T)
-                perturbation = pert_eps * torch.randn_like(z0)
-                zt_pert = dataloader.dataset.body.integrate(z0 + perturbation, long_T)
+                perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
+                z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-5) #project
+                zt_pert = body.integrate(z0_perturbed, long_T)
                 # (bs,T,2,n,2)
                 rel_error = ((zt_pred - zt) ** 2).sum(-1).sum(-1).sum(-1).sqrt() / (
                     (zt_pred + zt) ** 2
                 ).sum(-1).sum(-1).sum(-1).sqrt()
                 rel_errs.append(rel_error)
-                pert_rel_error = ((zt_pert - zt) ** 2).sum(-1).sum(-1).sum(
-                    -1
+                pert_rel_error = ((zt_pert - zt) ** 2).sum(-1).sum(-1).sum(-1 \
                 ).sqrt() / ((zt_pert + zt) ** 2).sum(-1).sum(-1).sum(-1).sqrt()
                 pert_rel_errs.append(pert_rel_error)
             rel_errs = torch.cat(rel_errs, dim=0)  # (D,T)

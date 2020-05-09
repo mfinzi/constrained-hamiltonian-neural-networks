@@ -26,7 +26,7 @@ from biases.systems.gyroscope import Gyroscope
 from biases.models.constrained_hnn import CHNN, CHLC
 from biases.models.constrained_lnn import CLNN, CLLC
 from biases.models.hnn import HNN
-from biases.models.lnn import LNN
+from biases.models.lnn import LNN, DeLaN
 from biases.models.nn import NN, DeltaNN
 from biases.datasets import RigidBodyDataset
 from biases.systems.rigid_body import rigid_Phi,project_onto_constraints
@@ -59,6 +59,7 @@ class DynamicsModel(pl.LightningModule):
             "NN",
             "LNN",
             "HNN",
+            "DeLaN",
         ]  # TODO: try NN in euclideana
         vars(hparams).update(euclidean=euclidean)
 
@@ -97,9 +98,8 @@ class DynamicsModel(pl.LightningModule):
         self.body = body
         self.datasets = datasets
         self.splits = splits
-        self.batch_sizes = {
-            k: min(self.hparams.batch_size, v) for k, v in splits.items()
-        }
+        self.batch_sizes = dict(splits)
+        self.batch_sizes["train"] = min(self.hparams.batch_size, self.batch_sizes["train"])
         self.test_log = None
 
     def forward(self):
@@ -237,11 +237,10 @@ class DynamicsModel(pl.LightningModule):
     def compare_rollouts(
         self, z0: Tensor, integration_time: float, dt: float, tol: float, pert_eps=1e-4
     ):
-        # Ground truth is in double so we convert model to double
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
-        pred_zts = self.rollout(z0, ts, tol, "dopri5")#.cpu()
+        pred_zts = self.rollout(z0, ts, tol, "dopri5")
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
         if not self.hparams.euclidean:  # convert to euclidean for body to integrate
@@ -253,7 +252,7 @@ class DynamicsModel(pl.LightningModule):
         # (bs, n_steps, 2, n_dof, d)
         true_zts = body.integrate(z0, ts, tol=tol)
         perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
-        z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation,tol=1e-7) #project
+        z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation) #project
         pert_zts = body.integrate(z0_perturbed, ts, tol=tol)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
@@ -280,7 +279,6 @@ class DynamicsModel(pl.LightningModule):
         )
 
     def true_energy(self, zs):
-        zs = zs.double()
         N, T = zs.shape[:2]
         q, qdot = zs.chunk(2, dim=2)
         p = self.body.M @ qdot
@@ -393,7 +391,7 @@ class DynamicsModel(pl.LightningModule):
             "--network-class",
             type=str,
             help="Dynamics network",
-            choices=["NN", "DeltaNN", "HNN", "LNN", "CHNN", "CLNN", "CHLC", "CLLC"],
+            choices=["NN", "DeltaNN", "HNN", "LNN", "DeLaN", "CHNN", "CLNN", "CHLC", "CLLC"],
         )
         parser.add_argument(
             "--n-epochs", type=int, default=2000, help="Number of training epochs"
