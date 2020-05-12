@@ -9,7 +9,7 @@ from biases.animation import Animation
 @export
 class ChainPendulum(RigidBody):
     d=2
-    def __init__(self, links=2, beams=False, m=None, l=None):
+    def __init__(self, links=2, beams=False, m=1, l=1):
         self.body_graph = BodyGraph()#nx.Graph()
         self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
         assert not beams, "beams temporarily not supported"
@@ -115,6 +115,7 @@ class ChainPendulumV2(ChainPendulum):
                 self.body_graph.add_node(i, m=m)
                 self.body_graph.add_edge(i - 1, i, l=l)
 
+@export
 class PendulumAnimation(Animation):
     def __init__(self, qt, body):
         super().__init__(qt, body)
