@@ -35,69 +35,46 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         print("CH currently assumes potential energy depends only on q")
         print("CH currently assumes time independent Hamiltonian")
         print("CH assumes positions q are in Cartesian coordinates")
-        self.moments = torch.nn.Parameter(torch.ones(self.n_dof,self.n_dof))
-        self.masses = torch.nn.Parameter(torch.zeros(self.n_dof))
+        #self.moments = torch.nn.Parameter(torch.ones(self.n_dof,self.n_dof))
+        #self.masses = torch.nn.Parameter(torch.zeros(self.n_dof))
         #self.moments = torch.nn.Parameter(torch.zeros(self.dof_ndim,self.n_dof))
-    @property
-    def M(self):
-        #return torch.diag(F.softplus(self.masses))
-        M = torch.zeros(self.n_dof,self.n_dof,device=self.masses.device,dtype=self.masses.dtype)
-        for ki, _ in nx.get_node_attributes(self.G, "m").items():
-            i = self.G.key2id[ki]
-            M[i, i] += F.softplus(self.masses[i]) # Learned mass
-        for (ki,kj), _ in nx.get_edge_attributes(self.G,"I").items():
-            i,j = self.G.key2id[ki],self.G.key2id[kj]
-            I = F.softplus((self.moments[i,j]+self.moments[j,i])/2) # Learned 2nd moment
-            M[i,i] += I
-            M[i,j] -= I
-            M[j,i] -= I
-            M[j,j] += I
-        return M
+        self.d_moments = nn.ParameterDict(
+            {str(d):torch.nn.Parameter(.1*torch.randn(len(d_objs)//(d+1),d+1)) # N,d+1
+                for d,d_objs in G.d2ids.items()})
 
-    #@property
     def Minv(self,p):
         """ assumes p shape (*,n,a) and n is organized, all the same dimension for now"""
-        #ones = torch.ones(self.n_dof,self)
-        #Mi = torch.zeros(self.n_dof,self.n_dof)
-        #return torch.diag(1/F.softplus(self.masses))
-        return torch.inverse(self.M)[None]@p
-    
-    # def log_data(self,logger,step,name):
-    #     print(self.Minv)
-    # @property
-    # def tril_Minv(self):
-    #     res = torch.triu(self._Minv, diagonal=1)
-    #     # Constrain diagonal of Cholesky to be positive
-    #     res = res + torch.diag_embed(
-    #         torch.nn.functional.softplus(torch.diagonal(self._Minv, dim1=-2, dim2=-1)),
-    #         dim1=-2,
-    #         dim2=-1,
-    #     )
-    #     res = res.transpose(-1, -2)  # Make lower triangular
-    #     return res
+        assert len(self.d_moments)==1, "For now only supporting 1 dimension at a time"
+        d = int(list(self.d_moments.keys())[0])
 
-    # @property
-    # def M(self):
-    #     """Compute the learned inverse mass matrix M^{-1}
+        *start,n,a = p.shape
+        N = n//(d+1) # number of extended bodies
+        p_reshaped = p.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)
+        inv_moments = torch.exp(self.d_moments[str(d)])
+        inv_masses = inv_moments[:,:1] # (N,1)
+        if d==0: return (inv_masses.unsqueeze(-1)*p_reshaped).reshape(*p.shape)# no inertia for point masses
+        padded_inertias_inv = torch.cat([0*inv_masses,inv_moments[:,1:]],dim=-1) # (N,d+1)
+        inverse_massed_p = p_reshaped.sum(-2,keepdims=True)*inv_masses[:,:,None]
+        total = inverse_massed_p + p_reshaped*padded_inertias_inv[:,:,None]
+        return total.reshape(*p.shape)
 
-    #     Args:
-    #         q: N x D Tensor representing the position
-    #     """
-    #     lower_triangular = self.tril_Minv
-    #     Minv_mat = lower_triangular @ lower_triangular.T
-    #     return Minv_mat
-    # @property
-    # def Minv(self):#, qdot):
-    #     """Computes the mass matrix times a vector.
-    #     Note that the input must be in Cartesian coordinates
-    #     """
-    #     #assert qdot.ndim == 2
-    #     #assert qdot.size(-1) == self.n_dof * self.dof_ndim
-    #     #qdot = qdot.reshape(-1, self.n_dof, self.dof_ndim)
-    #     #lower_diag = self.tril_Minv
-    #     #M_qdot = torch.cholesky_solve(qdot, lower_diag.unsqueeze(0), upper=False)
-    #     #M_qdot = M_qdot.reshape(-1, self.n_dof * self.dof_ndim)
-    #     return torch.inverse(self.M)#M_qdot
+    def M(self,v):
+        """ assumes v has shape (*,n,a) and n is organized, all the same dimension for now"""
+        assert len(self.d_moments)==1, "For now only supporting 1 dimension at a time"
+        d = int(list(self.d_moments.keys())[0])
+        *start,n,a = v.shape 
+        N = n//(d+1) # number of extended bodies
+        v_reshaped = v.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)       
+        moments = torch.exp(-self.d_moments[str(d)])
+        masses = moments[:,:1]
+        if d==0: return (masses.unsqueeze(-1)*v_reshaped).reshape(*v.shape) # no inertia for point masses
+        a00 = (masses + moments[:,1:].sum(-1,keepdims=True)).unsqueeze(-1) #(N,1,1)
+        ai0 = a0i = -moments[:,1:].unsqueeze(-1) #(N,d,1)
+        p0 = a00*v[...,:1,:] + (a0i*v[...,1:,:]).sum(-2,keepdims=True)
+        aii = moments[:,1:].unsqueeze(-1) # (N,d,1)
+        
+        pi = ai0*v[...,:1,:] +aii*v[...,1:,:]
+        return torch.cat([p0,pi],dim=-2).reshape(*v.shape)
 
 
     def H(self, t, z):
@@ -126,7 +103,8 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         v = self.Minv(p)
         DPhi = rigid_DPhi(self.G, x, v)
         # Convert d/dv to d/dp
-        DPhi[:,1] = self.Minv(DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1].shape)
+        #DPhi[:,1] = 
+        DPhi = torch.cat([DPhi[:,:1],self.Minv(DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1:].shape)],dim=1)
         return DPhi.reshape(bs,2*n*d,-1)
 
     def forward(self, t, z):
@@ -155,7 +133,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         bs = z0.size(0)
         #z0 = z0.reshape(N, -1)  # -> N x (2 * n_dof * dof_ndim) =: N x D
         x0, xdot0 = z0.chunk(2, dim=1)
-        p0 = self.M@xdot0
+        p0 = self.M(xdot0)
 
         self.nfe = 0
         xp0 = torch.stack([x0, p0], dim=1).reshape(bs,-1)

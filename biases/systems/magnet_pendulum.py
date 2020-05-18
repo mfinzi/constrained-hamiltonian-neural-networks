@@ -12,7 +12,7 @@ class MagnetPendulum(RigidBody):
     n=1
     D = 2
     angular_dims = range(2)
-    def __init__(self, mass=2.4, l=1, q=.1, magnets=2):
+    def __init__(self, mass=3, l=1, q=.3, magnets=2):
         mass = np.random.rand()*.8+1.6 if mass is None else mass
         self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()

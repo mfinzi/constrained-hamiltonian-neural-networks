@@ -15,7 +15,6 @@ import biases.models as models
 import biases.systems as systems
 import lie_conv.lieGroups as lieGroups
 import pickle
-
 # network = HNN, LNN, NN, CHNN
 def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
         dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,dt=0.1,
@@ -59,7 +58,7 @@ if __name__ == "__main__":
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
         if save: print(f"saved at: {trainer.save_checkpoint()}")
-        # rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
+        rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
         # fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
         # with open(fname,'wb') as f:
         #     pickle.dump(rollouts,f)
