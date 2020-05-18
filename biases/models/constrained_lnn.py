@@ -47,13 +47,27 @@ class CL(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         *start,n,a = p.shape
         N = n//(d+1) # number of extended bodies
         p_reshaped = p.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)
-        inv_moments = torch.exp(self.d_moments[str(d)])
+        inv_moments = torch.exp(-self.d_moments[str(d)])
         inv_masses = inv_moments[:,:1] # (N,1)
-        if d==0: return (inv_masses.unsqueeze(-1)*p_reshaped).reshape(*p.shape)# no inertia for point masses
         padded_inertias_inv = torch.cat([0*inv_masses,inv_moments[:,1:]],dim=-1) # (N,d+1)
         inverse_massed_p = p_reshaped.sum(-2,keepdims=True)*inv_masses[:,:,None]
         total = inverse_massed_p + p_reshaped*padded_inertias_inv[:,:,None]
         return total.reshape(*p.shape)
+
+    # def Minv(self,p): # version where inertia is scaled by mass
+    #     """ assumes p shape (*,n,a) and n is organized, all the same dimension for now"""
+    #     assert len(self.d_moments)==1, "For now only supporting 1 dimension at a time"
+    #     d = int(list(self.d_moments.keys())[0])
+
+    #     *start,n,a = p.shape
+    #     N = n//(d+1) # number of extended bodies
+    #     p_reshaped = p.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)
+    #     inv_moments = torch.exp(-self.d_moments[str(d)])
+    #     inv_masses = inv_moments[:,:1] # (N,1)
+    #     if d==0: return (inv_masses.unsqueeze(-1)*p_reshaped).reshape(*p.shape)# no inertia for point masses
+    #     padded_inertias_inv = torch.cat([0*inv_masses,1+inv_moments[:,1:]],dim=-1) # (N,d+1)
+    #     total = (p_reshaped.sum(-2,keepdims=True) + p_reshaped*padded_inertias_inv[:,:,None])*inv_masses[:,:,None]
+    #     return total.reshape(*p.shape)
     
 
     def DPhi(self, x,v):

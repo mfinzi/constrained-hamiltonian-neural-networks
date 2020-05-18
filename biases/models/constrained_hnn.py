@@ -50,7 +50,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         *start,n,a = p.shape
         N = n//(d+1) # number of extended bodies
         p_reshaped = p.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)
-        inv_moments = torch.exp(self.d_moments[str(d)])
+        inv_moments = torch.exp(-self.d_moments[str(d)])
         inv_masses = inv_moments[:,:1] # (N,1)
         if d==0: return (inv_masses.unsqueeze(-1)*p_reshaped).reshape(*p.shape)# no inertia for point masses
         padded_inertias_inv = torch.cat([0*inv_masses,inv_moments[:,1:]],dim=-1) # (N,d+1)
@@ -65,7 +65,7 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         *start,n,a = v.shape 
         N = n//(d+1) # number of extended bodies
         v_reshaped = v.reshape(*start,N,d+1,a) # (*, # separate bodies, # internal body nodes, a)       
-        moments = torch.exp(-self.d_moments[str(d)])
+        moments = torch.exp(self.d_moments[str(d)])
         masses = moments[:,:1]
         if d==0: return (masses.unsqueeze(-1)*v_reshaped).reshape(*v.shape) # no inertia for point masses
         a00 = (masses + moments[:,1:].sum(-1,keepdims=True)).unsqueeze(-1) #(N,1,1)
