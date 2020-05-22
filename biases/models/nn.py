@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Linear, CosSin
+from biases.models.utils import FCsoftplus,FCtanh, Linear, CosSin
 from typing import Tuple, Union
 
 
@@ -28,10 +28,10 @@ class NN(nn.Module, metaclass=Named):
         self.net = nn.Sequential(
             CosSin(self.q_ndim, angular_dims, only_q=False),
             *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], 2 * self.q_ndim, zero_bias=True, orthogonal_init=True)
+            Linear(chs[-1], 2 * self.q_ndim, zero_bias=False, orthogonal_init=True)
         )
         print("NN currently assumes time independent ODE")
         self.nfe = 0

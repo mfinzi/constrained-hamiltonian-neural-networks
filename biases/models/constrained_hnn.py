@@ -159,7 +159,7 @@ class CHNN(CH):
     def __init__(self,G,
         dof_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
-        hidden_size: int = 200,
+        hidden_size: int = 256,
         num_layers=3,
         wgrad=True,
         **kwargs

@@ -106,7 +106,7 @@ class CLNN(CL):
     def __init__(self,G,
         dof_ndim: Optional[int] = None,
         angular_dims: Union[Tuple, bool] = tuple(),
-        hidden_size: int = 200,
+        hidden_size: int = 256,
         num_layers=3,
         wgrad=True,
         **kwargs
@@ -116,9 +116,9 @@ class CLNN(CL):
         n = len(G.nodes())
         chs = [n * self.dof_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
-            *[FCtanh(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+            *[FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)],
-            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+            Linear(chs[-1], 1, zero_bias=False, orthogonal_init=True),
             Reshape(-1)
         )
 

@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 from torchdiffeq import odeint
 from oil.utils.utils import export, Named
-from biases.models.utils import FCsoftplus, Reshape, Linear, CosSin
+from biases.models.utils import FCsoftplus, FCtanh, Reshape, Linear, CosSin
 from biases.dynamics.hamiltonian import HamiltonianDynamics, GeneralizedT
 from typing import Tuple
 
@@ -14,7 +14,7 @@ class HNN(nn.Module, metaclass=Named):
         self,
         G,
         dof_ndim: int = 1,
-        hidden_size: int = 200,
+        hidden_size: int = 256,
         num_layers: int = 3,
         canonical: bool = False,
         angular_dims: Tuple = tuple(),
@@ -33,10 +33,10 @@ class HNN(nn.Module, metaclass=Named):
         self.potential_net = nn.Sequential(
             CosSin(self.q_ndim, angular_dims, only_q=True),
             *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+            Linear(chs[-1], 1, zero_bias=False, orthogonal_init=True),
             Reshape(-1)
         )
         print("HNN currently assumes potential energy depends only on q")
@@ -45,10 +45,10 @@ class HNN(nn.Module, metaclass=Named):
         self.mass_net = nn.Sequential(
             CosSin(self.q_ndim, angular_dims, only_q=True),
             *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+                FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True),
+            Linear(chs[-1], self.q_ndim * self.q_ndim, zero_bias=False, orthogonal_init=True),
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)

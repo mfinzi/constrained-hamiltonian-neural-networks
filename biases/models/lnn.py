@@ -14,7 +14,7 @@ class LNN(nn.Module, metaclass=Named):
         self,
         G,
         dof_ndim: int = 1,
-        hidden_size: int = 200,
+        hidden_size: int = 256,
         num_layers: int = 3,
         angular_dims: Tuple = tuple(),
         wgrad: bool = True,
