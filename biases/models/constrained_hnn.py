@@ -3,12 +3,12 @@ import torch.nn as nn
 from torchdiffeq import odeint
 from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import Trivial
-from biases.models.utils import FCtanh, Linear, Reshape
+from biases.models.utils import FCtanh,FCswish,FCsoftplus, Linear, Reshape
 from biases.dynamics.hamiltonian import (
     EuclideanT,
     ConstrainedHamiltonianDynamics,
 )
-from biases.systems.rigid_body import rigid_DPhi
+from biases.systems.rigid_body import rigid_DPhi,rigid_Phi
 from typing import Optional, Tuple, Union
 from lie_conv.utils import export, Named
 import networkx as nx
@@ -107,6 +107,13 @@ class CH(nn.Module, metaclass=Named):  # abstract constrained Hamiltonian networ
         DPhi = torch.cat([DPhi[:,:1],self.Minv(DPhi[:,1].reshape(bs,n,-1)).reshape(DPhi[:,1:].shape)],dim=1)
         return DPhi.reshape(bs,2*n*d,-1)
 
+    def Phi(self,zp):
+        bs,n,d = zp.shape[0],self.n_dof,self.dof_ndim
+        x,p = zp.reshape(bs,2,n,d).unbind(dim=1)
+        v = self.Minv(p)
+        Phi = rigid_Phi(self.G, x, v)
+        return Phi.reshape(bs,-1)
+
     def forward(self, t, z):
         self.nfe += 1
         return self.dynamics(t, z)
@@ -162,9 +169,9 @@ class CHNN(CH):
         n = len(G.nodes())
         chs = [n * self.dof_ndim] + num_layers * [hidden_size]
         self.potential_net = nn.Sequential(
-            *[FCtanh(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+            *[FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)],
-            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+            Linear(chs[-1], 1, zero_bias=False, orthogonal_init=True),
             Reshape(-1)
         )
 
