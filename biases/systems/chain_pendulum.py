@@ -9,6 +9,8 @@ from biases.animation import Animation
 @export
 class ChainPendulum(RigidBody):
     d=2
+    dt=.03
+    integration_time=3
     def __init__(self, links=2, beams=False, m=None, l=None):
         self.body_graph = BodyGraph()#nx.Graph()
         self.arg_string = f"n{links}{'b' if beams else ''}m{m or 'r'}l{l or 'r'}"
@@ -79,7 +81,7 @@ class ChainPendulum(RigidBody):
         z = self.body2globalCoords(angles_and_angvel)
         #z = torch.randn(N,2,n,2)
         z[:,0] += .2*torch.randn(N,n,2)
-        z[:,1] = .5*z[:,1] + .4*torch.randn(N,n,2)
+        z[:,1] = (.5*z[:,1] + .4*torch.randn(N,n,2))*3
         try: return project_onto_constraints(self.body_graph,z,tol=1e-5)
         except OverflowError: return self.sample_initial_conditions(N)
         
@@ -87,7 +89,7 @@ class ChainPendulum(RigidBody):
 
     def potential(self, x):
         """ Gravity potential """
-        return (self.M @ x)[..., 1].sum(1)
+        return 9.81*(self.M @ x)[..., 1].sum(1)
 
     def __str__(self):
         return f"{self.__class__}{self.arg_string}"
