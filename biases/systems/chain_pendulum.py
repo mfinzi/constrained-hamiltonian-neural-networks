@@ -1,7 +1,7 @@
 import torch
 import networkx as nx
 import numpy as np
-from oil.utils.utils import export
+from oil.utils.utils import export,FixedNumpySeed
 from biases.systems.rigid_body import RigidBody, BodyGraph, project_onto_constraints
 from biases.animation import Animation
 
@@ -9,12 +9,13 @@ from biases.animation import Animation
 @export
 class ChainPendulum(RigidBody):
     d=2
-    def __init__(self, links=2, beams=False, m=1, l=1):
+    def __init__(self, links=2, beams=False, m=None, l=None):
         self.body_graph = BodyGraph()#nx.Graph()
-        self.arg_string = f"n{links}{'b' if beams else ''}m{m}l{l}"
+        self.arg_string = f"n{links}{'b' if beams else ''}m{m or 'r'}l{l or 'r'}"
         assert not beams, "beams temporarily not supported"
-        ms = [.6+.8*np.random.rand() for _ in range(links)] if m is None else links*[m]
-        ls = [.6+.8*np.random.rand() for _ in range(links)] if l is None else links*[l]
+        with FixedNumpySeed(0):
+            ms = [.6+.8*np.random.rand() for _ in range(links)] if m is None else links*[m]
+            ls = [.6+.8*np.random.rand() for _ in range(links)] if l is None else links*[l]
         self.body_graph.add_extended_nd(0, m=ms.pop(), d=0,tether=(torch.zeros(2),ls.pop()))
         for i in range(1, links):
             self.body_graph.add_extended_nd(i, m=ms.pop(), d=0)
@@ -129,16 +130,14 @@ class PendulumAnimation(Animation):
 
     def update(self, i=0):
         beams = [
-            torch.stack([self.qt[i, k, :], self.qt[i, l, :]], dim=1)
+            np.stack([self.qt[i, k, :], self.qt[i, l, :]], axis=1)
             for (k, l) in self.G.edges
         ] + [
-            torch.stack(
-                [loc.to(self.qt.device, self.qt.dtype), self.qt[i, k, :]], dim=1
-            )
+            np.stack([loc.cpu().data.numpy(), self.qt[i, k, :]], axis=1)
             for k, (loc,_) in nx.get_node_attributes(self.G, "tether").items()
         ]
         for beam, line in zip(beams, self.objects["beams"]):
             line.set_data(*beam[:2])
             if self.qt.shape[-1] == 3:
-                line.set_3d_properties(beam[2].data.numpy())
+                line.set_3d_properties(beam[2])
         return super().update(i)

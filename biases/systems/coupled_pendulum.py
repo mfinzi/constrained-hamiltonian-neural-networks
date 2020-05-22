@@ -1,7 +1,7 @@
 import torch
 import networkx as nx
 import numpy as np
-from oil.utils.utils import export
+from oil.utils.utils import export,FixedNumpySeed
 from biases.systems.rigid_body import RigidBody, BodyGraph, project_onto_constraints
 from biases.animation import Animation
 from biases.systems.chain_pendulum import PendulumAnimation
@@ -14,8 +14,9 @@ class CoupledPendulum(MagnetPendulum):
     d=3
     def __init__(self, bobs=2, m=1, l=1,k=10):
         self.body_graph = BodyGraph()#nx.Graph()
-        self.arg_string = f"n{bobs}m{m}l{l}"
-        ms = [.6+.8*np.random.rand() for _ in range(bobs)] if m is None else bobs*[m]
+        self.arg_string = f"n{bobs}m{m or 'r'}l{l}"
+        with FixedNumpySeed(0):
+            ms = [.6+.8*np.random.rand() for _ in range(bobs)] if m is None else bobs*[m]
         ls = bobs*[l]
         self.ks = torch.tensor((bobs-1)*[k]).float()
         self.locs = torch.zeros(bobs,3)
@@ -65,7 +66,7 @@ class CoupledPendulum(MagnetPendulum):
     def potential(self, x):
         """inputs [x (bs,n,d)] Gravity potential
            outputs [V (bs,)] """
-        gpe = 10*(self.M @ x)[..., 2].sum(1)
+        gpe = 9.81*(self.M @ x)[..., 2].sum(1)
         l0s = ((self.locs[1:]-self.locs[:-1])**2).sum(-1).sqrt().to(x.device,x.dtype)
         xdist = ((x[:,1:,:]-x[:,:-1,:])**2).sum(-1).sqrt()
         spring_energy = (.5*self.ks.to(x.device,x.dtype)*(xdist-l0s)**2).sum(1)

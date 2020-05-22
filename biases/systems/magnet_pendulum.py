@@ -1,6 +1,6 @@
 import torch
 import networkx as nx
-from oil.utils.utils import export
+from oil.utils.utils import export,FixedNumpySeed
 from biases.systems.rigid_body import RigidBody,BodyGraph
 from biases.systems.chain_pendulum import PendulumAnimation
 import numpy as np
@@ -12,9 +12,11 @@ class MagnetPendulum(RigidBody):
     n=1
     D = 2
     angular_dims = range(2)
+    dt=.05
     def __init__(self, mass=3, l=1, q=.3, magnets=2):
-        mass = np.random.rand()*.8+1.6 if mass is None else mass
-        self.arg_string = f"m{mass}l{l}q{q}mn{magnets}"
+        with FixedNumpySeed(0):
+            mass = np.random.rand()*.8+1.6 if mass is None else mass
+        self.arg_string = f"m{mass or 'r'}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()
         self.body_graph.add_extended_nd(0, m=mass, d=0, tether=(torch.zeros(3),l))
         self.q = q  # magnetic moment magnitude
@@ -34,7 +36,7 @@ class MagnetPendulum(RigidBody):
         angles_omega = torch.zeros(N,2,2)
         angles_omega[:,0,0] = np.pi+.3*torch.randn(N)
         angles_omega[:,1,0] = .05*torch.randn(N)
-        angles_omega[:,0,1] = np.pi/2 + .5*torch.randn(N)
+        angles_omega[:,0,1] = np.pi/2 + .2*torch.randn(N)
         angles_omega[:,1,1] = .4*torch.randn(N)
         xv = self.body2globalCoords(angles_omega)
         return xv
@@ -112,7 +114,7 @@ class MagnetPendulumAnimation(PendulumAnimation):
         self.magnets.set_data(*self.body.magnet_positions[:, :2].T)
         if d == 3:
             self.magnets.set_3d_properties(
-                self.body.magnet_positions[:, 2].data.numpy()
+                self.body.magnet_positions[:, 2].cpu().data.numpy()
             )
         self.ax.set_xlim((-1, 1))
         self.ax.set_ylim((-1, 1))

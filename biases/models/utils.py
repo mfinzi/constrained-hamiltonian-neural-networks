@@ -27,7 +27,7 @@ def Linear(chin, chout, zero_bias=False, orthogonal_init=False):
 
 class Reshape(nn.Module):
     def __init__(self, *args):
-        super(Reshape, self).__init__()
+        super().__init__()
         self.shape = args
 
     def forward(self, x):

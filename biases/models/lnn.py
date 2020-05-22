@@ -97,66 +97,67 @@ class LNN(nn.Module, metaclass=Named):
         return xvt.reshape(bs, len(ts), *z0.shape[1:])
 
 
+# @export
+# class DeLaN(LNN):
+#     def __init__(
+#         self,
+#         G,
+#         dof_ndim: int = 1,
+#         hidden_size: int = 200,
+#         num_layers: int = 3,
+#         angular_dims: Tuple = tuple(),
+#         wgrad: bool = True,
+#         **kwargs
+#     ):
+#         super().__init__(G=G, dof_ndim=dof_ndim, hidden_size=hidden_size,
+#                 num_layers=num_layers, angular_dims=angular_dims, wgrad=wgrad,
+#                 delan=True, **kwargs)
+#         self.nfe = 0
+
+#         self.q_ndim = dof_ndim
+#         self.angular_dims = angular_dims
+
+#         # We parameterize angular dims in terms of cos(theta), sin(theta)
+#         chs = [self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
+#         self.potential_net = nn.Sequential(
+#             CosSin(self.q_ndim, angular_dims, only_q=True),
+#             *[
+#                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+#                 for i in range(num_layers)
+#             ],
+#             Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
+#             Reshape(-1)
+#         )
+#         print("HNN currently assumes potential energy depends only on q")
+#         print("HNN currently assumes time independent Hamiltonian")
+
+#         self.mass_net = nn.Sequential(
+#             CosSin(self.q_ndim, angular_dims, only_q=True),
+#             *[
+#                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
+#                 for i in range(num_layers)
+#             ],
+#             Linear(
+#                 chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True
+#             ),
+#             Reshape(-1, self.q_ndim, self.q_ndim)
+#         )
+#         self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
+
+#     def net(self, z, eps=1e-1):
+#         assert z.size(-1) == 2 * self.q_ndim
+#         q, qdot = z.chunk(2, dim=-1)
+
+#         V = self.potential_net(q)
+#         M = self.mass_net(q)
+#         reg = eps * (qdot * qdot).sum(-1)
+#         T = (qdot * (M @ qdot.unsqueeze(-1)).squeeze(-1)).sum(-1) / 2.0 + reg
+#         return T - V
+
+
 @export
-class DeLaN(LNN):
-    def __init__(
-        self,
-        G,
-        dof_ndim: int = 1,
-        hidden_size: int = 200,
-        num_layers: int = 3,
-        angular_dims: Tuple = tuple(),
-        wgrad: bool = True,
-        **kwargs
-    ):
-        super().__init__(G=G, dof_ndim=dof_ndim, hidden_size=hidden_size,
-                num_layers=num_layers, angular_dims=angular_dims, wgrad=wgrad,
-                delan=True, **kwargs)
-        self.nfe = 0
-
-        self.q_ndim = dof_ndim
-        self.angular_dims = angular_dims
-
-        # We parameterize angular dims in terms of cos(theta), sin(theta)
-        chs = [self.q_ndim + len(angular_dims)] + num_layers * [hidden_size]
-        self.potential_net = nn.Sequential(
-            CosSin(self.q_ndim, angular_dims, only_q=True),
-            *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
-                for i in range(num_layers)
-            ],
-            Linear(chs[-1], 1, zero_bias=True, orthogonal_init=True),
-            Reshape(-1)
-        )
-        print("HNN currently assumes potential energy depends only on q")
-        print("HNN currently assumes time independent Hamiltonian")
-
-        self.mass_net = nn.Sequential(
-            CosSin(self.q_ndim, angular_dims, only_q=True),
-            *[
-                FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
-                for i in range(num_layers)
-            ],
-            Linear(
-                chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True
-            ),
-            Reshape(-1, self.q_ndim, self.q_ndim)
-        )
-        self.dynamics = LagrangianDynamics(self.L, wgrad=wgrad)
-
-    def net(self, z, eps=1e-1):
-        assert z.size(-1) == 2 * self.q_ndim
-        q, qdot = z.chunk(2, dim=-1)
-
-        V = self.potential_net(q)
-        M = self.mass_net(q)
-        reg = eps * (qdot * qdot).sum(-1)
-        T = (qdot * (M @ qdot.unsqueeze(-1)).squeeze(-1)).sum(-1) / 2.0 + reg
-        return T - V
-
-
-@export
-class DeLaN2(HNN):
+class DeLaN(HNN):
+    """ The new DeLaN that uses a native implementation of DeLaNdynamics for increased performance"""
     def __init__(self,*args,wgrad=True,**kwargs):
         super().__init__(*args,wgrad=True,**kwargs)
         M = lambda q,v: self.M(q)(v)

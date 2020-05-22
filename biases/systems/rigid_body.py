@@ -36,7 +36,7 @@ class BodyGraph(nx.Graph):
         for i in range(d):
             child_key = f'{key}_{i}'
             self.add_node(child_key)
-            self.add_edge(key,child_key,internal=True,l=1.,I=m*moments[i-1])
+            self.add_edge(key,child_key,internal=True,l=1.,I=m*moments[i])
             for j in range(i):
                 self.add_edge(f'{key}_{j}',child_key,internal=True,l=np.sqrt(2))
 
@@ -64,7 +64,9 @@ class RigidBody(object, metaclass=Named):
     """ Two dimensional rigid body consisting of point masses on nodes (with zero inertia)
         and beams with mass and inertia connecting nodes. Edge inertia is interpreted as
         the unitless quantity, I/ml^2. Ie 1/12 for a beam, 1/2 for a disk"""
-
+    dt = .1
+    integration_time=10
+    
     body_graph = NotImplemented
     _m = None
     _minv = None

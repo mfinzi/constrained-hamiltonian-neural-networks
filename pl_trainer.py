@@ -70,8 +70,6 @@ class DynamicsModel(pl.LightningModule):
             regen=hparams.regen,
             chunk_len=hparams.chunk_len,
             body=body,
-            dt=hparams.dt,
-            integration_time=hparams.integration_time,
             angular_coords=not euclidean,
         )
         splits = {
@@ -112,18 +110,18 @@ class DynamicsModel(pl.LightningModule):
         pred_zs = self.model.integrate(z0, ts, tol=tol, method=method)
         return pred_zs
 
-    def trajectory_mse(self, pred_zts, true_zts):
-        return (pred_zts - true_zts).pow(2).mean()
+    def trajectory_mae(self, pred_zts, true_zts):
+        return (pred_zts - true_zts).abs().mean()
 
     def training_step(self, batch: Tensor, batch_idx: int):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
         pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="rk4")
-        loss = self.trajectory_mse(pred_zs, zts)
+        loss = self.trajectory_mae(pred_zs, zts)
 
         logs = {
-            "train/trajectory_mse": loss.detach(),
+            "train/trajectory_mae": loss.detach(),
             "train/nfe": self.model.nfe,
         }
         return {
@@ -137,14 +135,14 @@ class DynamicsModel(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         log, save = self._collect_test_steps(outputs)
         log = {f"validation/{k}": v for k, v in log.items()}
-        return {"val_loss": log["validation/trajectory_mse"], "log": log}
+        return {"val_loss": log["validation/trajectory_mae"], "log": log}
 
     def test_step(self, batch, batch_idx, integration_factor=1.0):
         (z0, ts), zts = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         ts = ts[0] - ts[0, 0]  # Start ts from 0
         pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="dopri5")
-        loss = self.trajectory_mse(pred_zs, zts)
+        loss = self.trajectory_mae(pred_zs, zts)
 
         (
             pred_zts,
@@ -156,8 +154,8 @@ class DynamicsModel(pl.LightningModule):
             abs_err_pert_true,
         ) = self.compare_rollouts(
             z0,
-            integration_factor * self.hparams.integration_time,
-            self.hparams.dt,
+            integration_factor * self.body.integration_time,
+            self.body.dt,
             self.hparams.tol,
         )
         pred_zts_true_energy = self.true_energy(pred_zts)
@@ -165,7 +163,7 @@ class DynamicsModel(pl.LightningModule):
         pert_zts_true_energy = self.true_energy(pert_zts)
 
         return {
-            "trajectory_mse": loss.detach(),
+            "trajectory_mae": loss.detach(),
             "pred_zts": pred_zts.detach(),
             "true_zts": true_zts.detach(),
             "pert_zts": pert_zts.detach(),
@@ -179,7 +177,7 @@ class DynamicsModel(pl.LightningModule):
         }
 
     def _collect_test_steps(self, outputs):
-        loss = collect_tensors("trajectory_mse", outputs).mean(0).item()
+        loss = collect_tensors("trajectory_mae", outputs).mean(0).item()
         # Average errors across batches
         rel_err_pred_true = (collect_tensors("rel_err_pred_true", outputs)) + 1e-8
         abs_err_pred_true = (collect_tensors("abs_err_pred_true", outputs)) + 1e-8
@@ -187,16 +185,16 @@ class DynamicsModel(pl.LightningModule):
         abs_err_pert_true = (collect_tensors("abs_err_pert_true", outputs)) + 1e-8
         # average of integration of log errs
         int_rel_err_pred_true = self.integrate_curve(
-            rel_err_pred_true.log(), dt=self.hparams.dt
+            rel_err_pred_true.log(), dt=self.body.dt
         ).mean(0)
         int_abs_err_pred_true = self.integrate_curve(
-            abs_err_pred_true.log(), dt=self.hparams.dt
+            abs_err_pred_true.log(), dt=self.body.dt
         ).mean(0)
         int_rel_err_pert_true = self.integrate_curve(
-            rel_err_pert_true.log(), dt=self.hparams.dt
+            rel_err_pert_true.log(), dt=self.body.dt
         ).mean(0)
         int_abs_err_pert_true = self.integrate_curve(
-            abs_err_pert_true.log(), dt=self.hparams.dt
+            abs_err_pert_true.log(), dt=self.body.dt
         ).mean(0)
 
         pred_zts_true_energy = collect_tensors("pred_zts_true_energy", outputs)
@@ -204,16 +202,16 @@ class DynamicsModel(pl.LightningModule):
         pert_zts_true_energy = collect_tensors("pert_zts_true_energy", outputs)
 
         int_pred_true_energy = self.integrate_curve(
-            pred_zts_true_energy, dt=self.hparams.dt
+            pred_zts_true_energy, dt=self.body.dt
         ).mean(0)
         int_true_true_energy = self.integrate_curve(
-            true_zts_true_energy, dt=self.hparams.dt
+            true_zts_true_energy, dt=self.body.dt
         ).mean(0)
         int_pert_true_energy = self.integrate_curve(
-            pert_zts_true_energy, dt=self.hparams.dt
+            pert_zts_true_energy, dt=self.body.dt
         ).mean(0)
         log = {
-            "trajectory_mse": loss,
+            "trajectory_mae": loss,
             "int_rel_err_pred_true": int_rel_err_pred_true,
             "int_abs_err_pred_true": int_abs_err_pred_true,
             "int_rel_err_pert_true": int_rel_err_pert_true,
@@ -368,15 +366,17 @@ class DynamicsModel(pl.LightningModule):
             default="RigidBodyDataset",
             help="Dataset class",
         )
-        parser.add_argument(
-            "--dt", type=float, default=1e-1, help="Timestep size in generated data"
-        )
-        parser.add_argument(
-            "--integration-time",
-            type=float,
-            default=10.0,
-            help="Amount of time to integrate for in generating training trajectories",
-        )
+        ########## dt and integration_time are now attributes of body ###################
+        # parser.add_argument(
+        #     "--dt", type=float, default=1e-1, help="Timestep size in generated data"
+        # )
+        # parser.add_argument(
+        #     "--integration-time",
+        #     type=float,
+        #     default=10.0,
+        #     help="Amount of time to integrate for in generating training trajectories",
+        # )
+        #################################################################################
         parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
         parser.add_argument(
             "--n-test", type=int, default=100, help="Number of test trajectories"

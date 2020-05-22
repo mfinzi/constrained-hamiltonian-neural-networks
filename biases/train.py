@@ -17,7 +17,7 @@ import lie_conv.lieGroups as lieGroups
 import pickle
 # network = HNN, LNN, NN, CHNN
 def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
-        dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,dt=0.1,
+        dataset=RigidBodyDataset,body=ChainPendulum(3),C=5,
         dtype=torch.float32,device=torch.device("cuda"),
         bs=200,num_epochs=100,trainer_config={},
         opt_cfg={'weight_decay':1e-5}):
@@ -25,8 +25,7 @@ def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
     angular = not issubclass(network,(CH,CL))
     splits = {"train": n_train,"test": 200}
     with FixedNumpySeed(0):
-        dataset = dataset(n_systems=1000, regen=regen, chunk_len=C,body=body,
-                        dt=dt, integration_time=10,angular_coords=angular)
+        dataset = dataset(n_systems=n_train+200, regen=regen, chunk_len=C,body=body,angular_coords=angular)
         datasets = split_dataset(dataset, splits)
 
     
@@ -59,8 +58,9 @@ if __name__ == "__main__":
         trainer.train(cfg['num_epochs'])
         if save: print(f"saved at: {trainer.save_checkpoint()}")
         rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
-        # fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
-        # with open(fname,'wb') as f:
-        #     pickle.dump(rollouts,f)
+        print(f"rollout error GeoMean {rollouts[:,1:,0].log().mean().exp():.3E}")
+        fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
+        with open(fname,'wb') as f:
+            pickle.dump(rollouts,f)
         #defaults["trainer_config"]["early_stop_metric"] = "val_MSE"
         #print(Trial()))

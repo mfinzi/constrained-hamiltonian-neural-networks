@@ -14,22 +14,24 @@ class IntegratedDynamicsTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.hypers["tol"] = tol
         self.num_mbs = 0
-
+        self.text_to_add=np.arange(1)
     def loss(self, minibatch):
         """ Standard cross-entropy loss """
         (z0, ts), true_zs = minibatch
         pred_zs = self.model.integrate(z0, ts[0], tol=self.hypers["tol"])
         self.num_mbs += 1
-        return (pred_zs - true_zs).pow(2).mean()
+        self.text_to_add = true_zs[0,:,0,:].cpu().detach().data.numpy()#true_zs[:,:,1,2].abs().max().cpu().detach().data.numpy()
+        return (pred_zs - true_zs).abs().mean()
 
     def metrics(self, loader):
-        mse = lambda mb: self.loss(mb).cpu().data.numpy()
-        return {"MSE": self.evalAverageMetrics(loader, mse)}
+        mae = lambda mb: self.loss(mb).cpu().data.numpy()
+        return {"MAE": self.evalAverageMetrics(loader, mae)}
 
     def logStuff(self, step, minibatch=None):
         self.logger.add_scalars(
             "info", {"nfe": self.model.nfe / (max(self.num_mbs, 1e-3))}, step
         )
+        #print(self.text_to_add)
         super().logStuff(step, minibatch)
 
     def test_rollouts(self, angular_to_euclidean=False, pert_eps=1e-4):
@@ -42,12 +44,12 @@ class IntegratedDynamicsTrainer(Trainer):
                 z0, T = mb[0]  # assume timesteps evenly spaced for now
                 #z0 = z0.cpu().double()
                 T = T[0]
-                dT = (T[-1] - T[0]) / len(T)
-                long_T = dT * torch.arange(50 * len(T)).to(z0.device, z0.dtype)
-                zt_pred = self.model.integrate(z0, long_T)
+                body = dataloader.dataset.body
+                long_T = body.dt * torch.arange(body.integration_time//body.dt).to(z0.device, z0.dtype)
+                zt_pred = self.model.integrate(z0, long_T,tol=1e-6,method='dopri5')
                 bs, Nlong, *rest = zt_pred.shape
                 # add conversion from angular to euclidean
-                body = dataloader.dataset.body
+                
                 if angular_to_euclidean:
                     z0 = body.body2globalCoords(z0)
                     flat_pred = body.body2globalCoords(zt_pred.reshape(bs * Nlong, *rest))
@@ -72,25 +74,3 @@ class IntegratedDynamicsTrainer(Trainer):
 
 def logspace(a, b, k):
     return np.exp(np.linspace(np.log(a), np.log(b), k))
-
-
-from torch.nn.utils import spectral_norm
-
-
-def add_spectral_norm(module):
-    if isinstance(
-        module,
-        (
-            nn.ConvTranspose1d,
-            nn.ConvTranspose2d,
-            nn.ConvTranspose3d,
-            nn.Conv1d,
-            nn.Conv2d,
-            nn.Conv3d,
-        ),
-    ):
-        spectral_norm(module, dim=1)
-        # print("SN on conv layer: ",module)
-    elif isinstance(module, nn.Linear):
-        spectral_norm(module, dim=0)
-        # print("SN on linear layer: ",module)

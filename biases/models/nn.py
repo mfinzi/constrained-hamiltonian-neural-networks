@@ -71,7 +71,7 @@ class NN(nn.Module, metaclass=Named):
 
 @export
 class DeltaNN(NN):
-    def integrate(self, z0, ts, tol=0.0):
+    def integrate(self, z0, ts, tol=0.0,method=None):
         """ Integrates an initial state forward in time according to the learned
         dynamics using Euler's method with predicted time derivatives
 
@@ -88,4 +88,4 @@ class DeltaNN(NN):
         zts = [z0.reshape(bs, -1)]
         for dt in dts:
             zts.append(zts[-1] + dt * self(ts[0], zts[-1]))
-        return torch.stack(zts, dim=1).reshape(N, len(ts), *z0.shape[1:])
+        return torch.stack(zts, dim=1).reshape(bs, len(ts), *z0.shape[1:])

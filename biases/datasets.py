@@ -21,8 +21,6 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         n_systems=100,
         regen=False,
         chunk_len=5,
-        dt=0.1,
-        integration_time=50,
         angular_coords=False,
         seed=0,
     ):
@@ -32,12 +30,12 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         )
         self.body = body
         filename = os.path.join(
-            root_dir, f"trajectories_{body}_N{n_systems}_dt{dt}_T{integration_time}.pz"
+            root_dir, f"trajectories_{body}_N{n_systems}.pz"
         )
         if os.path.exists(filename) and not regen:
             ts, zs = torch.load(filename)
         else:
-            ts, zs = self.generate_trajectory_data(n_systems, dt, integration_time)
+            ts, zs = self.generate_trajectory_data(n_systems)#, dt, integration_time)
             os.makedirs(root_dir, exist_ok=True)
             torch.save((ts, zs), filename)
         self.Ts, self.Zs = self.chunk_training_data(ts, zs, chunk_len)
@@ -59,7 +57,7 @@ class RigidBodyDataset(Dataset, metaclass=Named):
     def __getitem__(self, i):
         return (self.Zs[i, 0], self.Ts[i]), self.Zs[i]
 
-    def generate_trajectory_data(self, n_systems, dt, integration_time, bs=100):
+    def generate_trajectory_data(self, n_systems, bs=100):
         """ Returns ts: (n_systems, traj_len) zs: (n_systems, traj_len, z_dim) """
         bs = min(bs, n_systems)
         n_gen = 0
@@ -67,7 +65,7 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         while n_gen < n_systems:
             z0s = self.sample_system(bs)
             ts = torch.arange(
-                0, integration_time, dt, device=z0s.device, dtype=z0s.dtype
+                0, self.body.integration_time, self.body.dt, device=z0s.device, dtype=z0s.dtype
             )
             new_zs = self.body.integrate(z0s, ts)
             t_batches.append(ts[None].repeat(bs, 1))

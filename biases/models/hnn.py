@@ -48,9 +48,7 @@ class HNN(nn.Module, metaclass=Named):
                 FCsoftplus(chs[i], chs[i + 1], zero_bias=True, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(
-                chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True
-            ),
+            Linear(chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True),
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
@@ -86,7 +84,7 @@ class HNN(nn.Module, metaclass=Named):
         res = res.transpose(-1, -2)  # Make lower triangular
         return res
 
-    def Minv(self, q: Tensor, eps=1e-1) -> Tensor:
+    def Minv(self, q: Tensor, eps=1e-4) -> Tensor:
         """Compute the learned inverse mass matrix M^{-1}(q)
 
         Args:
@@ -99,7 +97,7 @@ class HNN(nn.Module, metaclass=Named):
         Minv = lower_triangular.matmul(lower_triangular.transpose(-2, -1)) + diag_noise
         return Minv
 
-    def M(self, q, eps=1e-1):
+    def M(self, q, eps=1e-4):
         """Returns a function that multiplies the mass matrix M(q) by a vector qdot
 
         Args:
