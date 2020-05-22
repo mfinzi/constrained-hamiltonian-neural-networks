@@ -15,7 +15,7 @@ class MagnetPendulum(RigidBody):
     dt=.05
     def __init__(self, mass=3, l=1, q=.3, magnets=2):
         with FixedNumpySeed(0):
-            mass = np.random.rand()*.8+1.6 if mass is None else mass
+            mass = np.random.rand()*.8+2.4 if mass is None else mass
         self.arg_string = f"m{mass or 'r'}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()
         self.body_graph.add_extended_nd(0, m=mass, d=0, tether=(torch.zeros(3),l))
