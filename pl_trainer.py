@@ -84,7 +84,7 @@ class DynamicsModel(pl.LightningModule):
             mode="val",
         )
         test_dataset = str_to_class(hparams.dataset_class)(
-            n_systems=hparams.n_train,
+            n_systems=hparams.n_test,
             regen=hparams.regen,
             chunk_len=hparams.chunk_len,
             body=body,
