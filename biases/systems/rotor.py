@@ -18,7 +18,7 @@ class Rotor(RigidBody):
     angular_dims = range(3,6)#slice(3,None)
     n=4
     dt=0.05
-    integration_time=5
+    integration_time=5.
     def __init__(self, mass=.1, obj='rotor'):#,moments=(1,2,3)):
         verts,tris =  read_obj(obj+'.obj')
         

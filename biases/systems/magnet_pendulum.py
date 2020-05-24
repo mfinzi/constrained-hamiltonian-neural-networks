@@ -12,7 +12,8 @@ class MagnetPendulum(RigidBody):
     n=1
     D = 2
     angular_dims = range(2)
-    dt=.05
+    dt=0.05
+    integration_time = 5.
     def __init__(self, mass=3, l=1, q=.3, magnets=2):
         with FixedNumpySeed(0):
             mass = np.random.rand()*.8+2.4 if mass is None else mass
