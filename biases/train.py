@@ -58,7 +58,7 @@ if __name__ == "__main__":
         trainer.train(cfg['num_epochs'])
         if save: print(f"saved at: {trainer.save_checkpoint()}")
         rollouts = trainer.test_rollouts(angular_to_euclidean= not issubclass(cfg['network'],(CH,CL)))
-        print(f"rollout error GeoMean {rollouts[:,1:,0].log().mean().exp():.3E}")
+        print(f"rollout error GeoMean {rollouts[0][:,1:].log().mean().exp():.3E}")
         fname = f"rollout_errs_{cfg['network']}_{cfg['body']}.np"
         with open(fname,'wb') as f:
             pickle.dump(rollouts,f)
