@@ -63,6 +63,7 @@ class DynamicsModel(pl.LightningModule):
         vars(hparams).update(euclidean=euclidean)
 
         body = str_to_class(hparams.body_class)(*hparams.body_args)
+        vars(hparams).update(dt=body.dt, integration_time=body.integration_time)
 
         train_dataset = str_to_class(hparams.dataset_class)(
             n_systems=hparams.n_train_systems,
