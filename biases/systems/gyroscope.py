@@ -18,8 +18,8 @@ class Gyroscope(RigidBody):
     D=3 #=3 euler coordinate dimension 
     angular_dims = range(3)
     n=4
-    dt=.02
-    integration_time = 5
+    dt=0.02
+    integration_time = 2
     def __init__(self, mass=.1, obj='gyro'):
         verts,tris =  read_obj(obj+'.obj')
         verts[:,2] -= verts[:,2].min() # set bottom as 0
