@@ -163,7 +163,7 @@ class DynamicsModel(pl.LightningModule):
         return {"val_loss": log["validation/trajectory_mae"], "log": log}
 
     def test_step(self, batch, batch_idx, integration_factor=1.0):
-        (z0, ts), zts = batch
+        (z0, ts), _ = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
         (
             pred_zts,
@@ -179,7 +179,7 @@ class DynamicsModel(pl.LightningModule):
             self.hparams.dt,
             self.hparams.tol,
         )
-        loss = self.trajectory_mae(pred_zts, zts)
+        loss = self.trajectory_mae(pred_zts, true_zts)
         pred_zts_true_energy = self.true_energy(pred_zts)
         true_zts_true_energy = self.true_energy(true_zts)
         pert_zts_true_energy = self.true_energy(pert_zts)
@@ -270,17 +270,17 @@ class DynamicsModel(pl.LightningModule):
 
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
-        # (bs, n_steps, 2, n_dof, d)
-        print("Rolling out true system")
-        true_zts = body.integrate(z0, ts, tol=tol)
         perturbation = pert_eps * torch.randn_like(
             z0
         )  # perturbation does not respect constraints
         z0_perturbed = project_onto_constraints(
             body.body_graph, z0 + perturbation
         )  # project
-        print("Rolling out perturbation")
-        pert_zts = body.integrate(z0_perturbed, ts, tol=tol)
+        # (bs, n_steps, 2, n_dof, d)
+        print("Rolling out true system")
+        z0_ = torch.cat([z0, z0_perturbed], dim=0)
+        true_zts_pert_zts = body.integrate(z0_, ts, tol=tol)
+        true_zts, pert_zts = true_zts_pert_zts.chunk(2, dim=0)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
         sq_diff_pert_true = (true_zts - pert_zts).pow(2).sum((2, 3, 4))
