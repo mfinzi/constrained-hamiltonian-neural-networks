@@ -155,7 +155,7 @@ class DynamicsModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-        return self.test_step(batch, batch_idx, integration_factor=0.5)
+        return self.test_step(batch, batch_idx, integration_factor=self.hparams.chunk_len * self.hparams.dt / self.hparams.integration_time)
 
     def validation_epoch_end(self, outputs):
         log, save = self._collect_test_steps(outputs)
