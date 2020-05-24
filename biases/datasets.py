@@ -23,23 +23,29 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         chunk_len=5,
         angular_coords=False,
         seed=0,
+        mode="train",
+        n_subsample=None,
     ):
         super().__init__()
+        self.mode = mode
         root_dir = root_dir or os.path.expanduser(
             f"~/datasets/ODEDynamics/{self.__class__}/"
         )
         self.body = body
         filename = os.path.join(
-            root_dir, f"trajectories_{body}_N{n_systems}.pz"
+            root_dir, f"trajectories_{body}_N{n_systems}_{mode}.pz"
         )
         if os.path.exists(filename) and not regen:
             ts, zs = torch.load(filename)
         else:
-            ts, zs = self.generate_trajectory_data(n_systems)#, dt, integration_time)
+            ts, zs = self.generate_trajectory_data(n_systems)
             os.makedirs(root_dir, exist_ok=True)
             torch.save((ts, zs), filename)
-        self.Ts, self.Zs = self.chunk_training_data(ts, zs, chunk_len)
-        self.Zs = self.Zs.float()
+        Ts, Zs = self.chunk_training_data(ts, zs, chunk_len)
+
+        if n_subsample is not None:
+            Ts, Zs = Ts[:n_subsample], Zs[:n_subsample]
+        self.Ts, self.Zs = Ts.float(), Zs.float()
         self.seed = seed
 
         torch.manual_seed(seed)
@@ -57,21 +63,36 @@ class RigidBodyDataset(Dataset, metaclass=Named):
     def __getitem__(self, i):
         return (self.Zs[i, 0], self.Ts[i]), self.Zs[i]
 
-    def generate_trajectory_data(self, n_systems, bs=100):
+    def generate_trajectory_data(self, n_systems, bs=10000):
         """ Returns ts: (n_systems, traj_len) zs: (n_systems, traj_len, z_dim) """
-        bs = min(bs, n_systems)
+
+        def base_10_to_base(n, b):
+            """Writes n (originally in base 10) in base `b` but reversed"""
+            if n == 0:
+                return '0'
+            nums = []
+            while n:
+                n, r = divmod(n, b)
+                nums.append(r)
+            return list(nums)
+
+        batch_sizes = base_10_to_base(n_systems, bs)
         n_gen = 0
-        t_batches, z_batches, sysp_batches = [], [], []
-        while n_gen < n_systems:
-            z0s = self.sample_system(bs)
+        t_batches, z_batches = [], []
+        for i, batch_size in enumerate(batch_sizes):
+            if batch_size == 0:
+                continue
+            batch_size = batch_size * (bs**i)
+            print(f"Generating {batch_size} more chunks")
+            z0s = self.sample_system(batch_size)
             ts = torch.arange(
                 0, self.body.integration_time, self.body.dt, device=z0s.device, dtype=z0s.dtype
             )
             new_zs = self.body.integrate(z0s, ts)
-            t_batches.append(ts[None].repeat(bs, 1))
+            t_batches.append(ts[None].repeat(batch_size, 1))
             z_batches.append(new_zs)
-            n_gen += bs
-            print(n_gen)
+            n_gen += batch_size
+            print(f"{n_gen} total trajectories generated for {self.mode}")
         ts = torch.cat(t_batches, dim=0)[:n_systems]
         zs = torch.cat(z_batches, dim=0)[:n_systems]
         return ts, zs
@@ -80,13 +101,15 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         """ Randomly samples chunks of trajectory data, returns tensors shaped for training.
         Inputs: [ts (batch_size, traj_len)] [zs (batch_size, traj_len, *z_dim)]
         outputs: [chosen_ts (batch_size, chunk_len)] [chosen_zs (batch_size, chunk_len, *z_dim)]"""
-        batch_size, traj_len, *z_dim = zs.shape
+        n_trajs, traj_len, *z_dim = zs.shape
         n_chunks = traj_len // chunk_len
-        chunk_idx = torch.randint(0, n_chunks, (batch_size,), device=zs.device).long()
+        # Cut each trajectory into non-overlapping chunks
         chunked_ts = torch.stack(ts.chunk(n_chunks, dim=1))
         chunked_zs = torch.stack(zs.chunk(n_chunks, dim=1))
-        chosen_ts = chunked_ts[chunk_idx, range(batch_size)]
-        chosen_zs = chunked_zs[chunk_idx, torch.arange(batch_size).long()]
+        # From each trajectory, we choose a single chunk randomly
+        chunk_idx = torch.randint(0, n_chunks, (n_trajs,), device=zs.device).long()
+        chosen_ts = chunked_ts[chunk_idx, range(n_trajs)]
+        chosen_zs = chunked_zs[chunk_idx, range(n_trajs)]
         return chosen_ts, chosen_zs
 
     def sample_system(self, N):

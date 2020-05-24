@@ -3,8 +3,6 @@ from oil.utils.utils import FixedNumpySeed
 
 import pytorch_lightning as pl
 
-import matplotlib.pyplot as plt
-
 import sys
 import csv
 import io
@@ -29,7 +27,8 @@ from biases.models.hnn import HNN
 from biases.models.lnn import LNN, DeLaN
 from biases.models.nn import NN, DeltaNN
 from biases.datasets import RigidBodyDataset
-from biases.systems.rigid_body import rigid_Phi,project_onto_constraints
+from biases.systems.rigid_body import rigid_Phi, project_onto_constraints
+
 
 def str_to_class(classname):
     return getattr(sys.modules[__name__], classname)
@@ -65,20 +64,41 @@ class DynamicsModel(pl.LightningModule):
 
         body = str_to_class(hparams.body_class)(*hparams.body_args)
 
-        dataset = str_to_class(hparams.dataset_class)(
-            n_systems=hparams.n_train + hparams.n_val + hparams.n_test,
+        train_dataset = str_to_class(hparams.dataset_class)(
+            n_systems=hparams.n_train_systems,
             regen=hparams.regen,
             chunk_len=hparams.chunk_len,
             body=body,
             angular_coords=not euclidean,
+            seed=hparams.seed,
+            mode="train",
+            n_subsample=hparams.n_train,
         )
+        val_dataset = str_to_class(hparams.dataset_class)(
+            n_systems=hparams.n_val,
+            regen=hparams.regen,
+            chunk_len=hparams.chunk_len,
+            body=body,
+            angular_coords=not euclidean,
+            seed=hparams.seed + 1,
+            mode="val",
+        )
+        test_dataset = str_to_class(hparams.dataset_class)(
+            n_systems=hparams.n_train,
+            regen=hparams.regen,
+            chunk_len=hparams.chunk_len,
+            body=body,
+            angular_coords=not euclidean,
+            seed=hparams.seed + 2,
+            mode="test",
+        )
+
+        datasets = {"train": train_dataset, "val": val_dataset, "test": test_dataset}
         splits = {
             "train": hparams.n_train,
             "val": hparams.n_val,
             "test": hparams.n_test,
         }
-        with FixedNumpySeed(hparams.seed):
-            datasets = split_dataset(dataset, splits)
 
         net_cfg = {
             "dof_ndim": body.d if euclidean else body.D,
@@ -97,7 +117,9 @@ class DynamicsModel(pl.LightningModule):
         self.datasets = datasets
         self.splits = splits
         self.batch_sizes = dict(splits)
-        self.batch_sizes["train"] = min(self.hparams.batch_size, self.batch_sizes["train"])
+        self.batch_sizes["train"] = min(
+            self.hparams.batch_size, self.batch_sizes["train"]
+        )
         self.test_log = None
 
     def forward(self):
@@ -249,8 +271,12 @@ class DynamicsModel(pl.LightningModule):
 
         # (bs, n_steps, 2, n_dof, d)
         true_zts = body.integrate(z0, ts, tol=tol)
-        perturbation = pert_eps * torch.randn_like(z0) # perturbation does not respect constraints
-        z0_perturbed = project_onto_constraints(body.body_graph,z0 + perturbation) #project
+        perturbation = pert_eps * torch.randn_like(
+            z0
+        )  # perturbation does not respect constraints
+        z0_perturbed = project_onto_constraints(
+            body.body_graph, z0 + perturbation
+        )  # project
         pert_zts = body.integrate(z0_perturbed, ts, tol=tol)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
@@ -391,7 +417,17 @@ class DynamicsModel(pl.LightningModule):
             "--network-class",
             type=str,
             help="Dynamics network",
-            choices=["NN", "DeltaNN", "HNN", "LNN", "DeLaN", "CHNN", "CLNN", "CHLC", "CLLC"],
+            choices=[
+                "NN",
+                "DeltaNN",
+                "HNN",
+                "LNN",
+                "DeLaN",
+                "CHNN",
+                "CLNN",
+                "CHLC",
+                "CLLC",
+            ],
         )
         parser.add_argument(
             "--n-epochs", type=int, default=2000, help="Number of training epochs"
@@ -401,6 +437,9 @@ class DynamicsModel(pl.LightningModule):
         )
         parser.add_argument(
             "--n-layers", type=int, default=3, help="Number of hidden layers"
+        )
+        parser.add_argument(
+            "--n-train-systems", type=int, default=10000, help="Number of hidden layers"
         )
         parser.add_argument(
             "--optimizer_class", type=str, default="AdamW", help="Optimizer",
@@ -456,7 +495,9 @@ def parse_misc():
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
-    parser.add_argument("--tags", type=str, nargs="*", default=None, help="Experiment tags")
+    parser.add_argument(
+        "--tags", type=str, nargs="*", default=None, help="Experiment tags"
+    )
     return parser
 
 
@@ -489,7 +530,9 @@ if __name__ == "__main__":
     else:
         print("Directory ", exp_dir, " already exists")
 
-    logger = WandbLogger(save_dir=exp_dir, project="constrained-pnns", log_model=True, tags=hparams.tags)
+    logger = WandbLogger(
+        save_dir=exp_dir, project="constrained-pnns", log_model=True, tags=hparams.tags
+    )
     ckpt_dir = os.path.join(
         logger.experiment.dir, logger.name, f"version_{logger.version}", "checkpoints",
     )
