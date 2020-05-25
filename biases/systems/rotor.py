@@ -38,20 +38,20 @@ class Rotor(RigidBody):
         #bodyX = torch.randn(N,2,4,3)
         #bodyX = project_onto_constraints(self.body_graph,bodyX)
         return bodyX
-        comEulers = (.75*torch.randn(N,2,6)).clamp(max=1.5,min=-1.5)
-        comEulers[:,0,3:]*=.05
-        comEulers[:,1,3:]*=1
-        # comEulers[:,1,5]*=500
-        comEulers[:,:,:3]*=.005
-        comEulers[:,1,5]*=4
-        #comEulers[]
-        bodyX = comEuler2bodyX(comEulers)
-        #bodyX = torch.randn(N,2,4,3) + torch.randn(N,1,1,1)
-        #bodyX = project_onto_constraints(self.body_graph,bodyX)
-        return bodyX
+        # comEulers = (.75*torch.randn(N,2,6)).clamp(max=1.5,min=-1.5)
+        # comEulers[:,0,3:]*=.05
+        # comEulers[:,1,3:]*=1
+        # # comEulers[:,1,5]*=500
+        # comEulers[:,:,:3]*=.005
+        # comEulers[:,1,5]*=4
+        # #comEulers[]
+        # bodyX = comEuler2bodyX(comEulers)
+        # #bodyX = torch.randn(N,2,4,3) + torch.randn(N,1,1,1)
+        # #bodyX = project_onto_constraints(self.body_graph,bodyX)
+        # return bodyX
         #return 
     def potential(self,x):
-        return 0
+        return 0.
     def body2globalCoords(self,comEulers):
         """ input: (bs,2,6) output: (bs,2,4,3) """
         return comEuler2bodyX(comEulers)
