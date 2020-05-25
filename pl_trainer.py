@@ -477,6 +477,7 @@ class SaveTestLogCallback(pl.Callback):
 
 def parse_misc():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--gradient-clip-val", type=float, default=0, help="Threshold for 2-norm of gradient. 0 is off")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -499,6 +500,7 @@ def parse_misc():
     parser.add_argument(
         "--tags", type=str, nargs="*", default=None, help="Experiment tags"
     )
+    parser.add_argument("--track-grad-norm", type=int, default=-1, help="Log gradient norms")
     return parser
 
 
