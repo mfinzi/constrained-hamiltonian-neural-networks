@@ -48,7 +48,7 @@ class HNN(nn.Module, metaclass=Named):
                 FCtanh(chs[i], chs[i + 1], zero_bias=False, orthogonal_init=True)
                 for i in range(num_layers)
             ],
-            Linear(chs[-1], self.q_ndim * self.q_ndim, zero_bias=False, orthogonal_init=True),
+            Linear(chs[-1], self.q_ndim * self.q_ndim, zero_bias=True, orthogonal_init=True),
             Reshape(-1, self.q_ndim, self.q_ndim)
         )
         self.dynamics = HamiltonianDynamics(self.H, wgrad=wgrad)
