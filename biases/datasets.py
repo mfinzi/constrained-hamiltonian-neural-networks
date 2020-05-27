@@ -6,8 +6,7 @@ from torch.utils.data import Dataset
 from oil.utils.utils import Named, export
 from biases.systems.rigid_body import RigidBody
 from biases.systems.chain_pendulum import ChainPendulum
-from biases.utils import rel_err
-
+from biases.utils import rel_err, FixedSeedAll
 
 @export
 class RigidBodyDataset(Dataset, metaclass=Named):
@@ -27,35 +26,33 @@ class RigidBodyDataset(Dataset, metaclass=Named):
         n_subsample=None,
     ):
         super().__init__()
-        self.mode = mode
-        root_dir = root_dir or os.path.expanduser(
-            f"~/datasets/ODEDynamics/{self.__class__}/"
-        )
-        self.body = body
-        filename = os.path.join(
-            root_dir, f"trajectories_{body}_N{n_systems}_{mode}.pz"
-        )
-        if os.path.exists(filename) and not regen:
-            ts, zs = torch.load(filename)
-        else:
-            ts, zs = self.generate_trajectory_data(n_systems)
-            os.makedirs(root_dir, exist_ok=True)
-            torch.save((ts, zs), filename)
-        Ts, Zs = self.chunk_training_data(ts, zs, chunk_len)
+        with FixedSeedAll(seed):
+            self.mode = mode
+            root_dir = root_dir or os.path.expanduser(
+                f"~/datasets/ODEDynamics/{self.__class__}/"
+            )
+            self.body = body
+            filename = os.path.join(
+                root_dir, f"trajectories_{body}_N{n_systems}_{mode}.pz"
+            )
+            if os.path.exists(filename) and not regen:
+                ts, zs = torch.load(filename)
+            else:
+                ts, zs = self.generate_trajectory_data(n_systems)
+                os.makedirs(root_dir, exist_ok=True)
+                torch.save((ts, zs), filename)
+            Ts, Zs = self.chunk_training_data(ts, zs, chunk_len)
 
-        if n_subsample is not None:
-            Ts, Zs = Ts[:n_subsample], Zs[:n_subsample]
-        self.Ts, self.Zs = Ts.float(), Zs.float()
-        self.seed = seed
-
-        torch.manual_seed(seed)
-
-        if angular_coords:
-            N, T = self.Zs.shape[:2]
-            flat_Zs = self.Zs.reshape(N * T, *self.Zs.shape[2:])
-            self.Zs = self.body.global2bodyCoords(flat_Zs.double())
-            print(rel_err(self.body.body2globalCoords(self.Zs), flat_Zs))
-            self.Zs = self.Zs.reshape(N, T, *self.Zs.shape[1:]).float()
+            if n_subsample is not None:
+                Ts, Zs = Ts[:n_subsample], Zs[:n_subsample]
+            self.Ts, self.Zs = Ts.float(), Zs.float()
+            self.seed = seed
+            if angular_coords:
+                N, T = self.Zs.shape[:2]
+                flat_Zs = self.Zs.reshape(N * T, *self.Zs.shape[2:])
+                self.Zs = self.body.global2bodyCoords(flat_Zs.double())
+                print(rel_err(self.body.body2globalCoords(self.Zs), flat_Zs))
+                self.Zs = self.Zs.reshape(N, T, *self.Zs.shape[1:]).float()
 
     def __len__(self):
         return self.Zs.shape[0]
