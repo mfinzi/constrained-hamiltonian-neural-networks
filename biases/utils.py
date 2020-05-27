@@ -3,6 +3,8 @@ from scipy.spatial.transform import Rotation
 import torch
 import numpy as np
 from oil.utils.utils import export
+import random
+import torch
 
 @export
 class FixedSeedAll(object):
