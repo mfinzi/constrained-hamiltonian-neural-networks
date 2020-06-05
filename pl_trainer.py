@@ -19,6 +19,7 @@ import PIL
 import numpy as np
 from biases.systems.chain_pendulum import ChainPendulum
 from biases.systems.rotor import Rotor
+from biases.systems.coupled_pendulum import CoupledPendulum
 from biases.systems.magnet_pendulum import MagnetPendulum
 from biases.systems.gyroscope import Gyroscope
 from biases.models.constrained_hnn import CHNN, CHLC
@@ -51,8 +52,9 @@ def fig_to_img(fig):
 
 
 class DynamicsModel(pl.LightningModule):
-    def __init__(self, hparams: argparse.Namespace):
+    def __init__(self, hparams: argparse.Namespace, **kwargs):
         super().__init__()
+        vars(hparams).update(**kwargs)
 
         euclidean = hparams.network_class not in [
             "NN",
@@ -497,6 +499,12 @@ def parse_misc():
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
+    parser.add_argument(
+        "--terminate-on-nan",
+        action="store_true",
+        default=False,
+        help="Terminate upon getting nans in loss or parameters at end of each batch"
+    )
     parser.add_argument(
         "--tags", type=str, nargs="*", default=None, help="Experiment tags"
     )
