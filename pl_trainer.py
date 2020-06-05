@@ -19,6 +19,7 @@ import PIL
 import numpy as np
 from biases.systems.chain_pendulum import ChainPendulum
 from biases.systems.rotor import Rotor
+from biases.systems.coupled_pendulum import CoupledPendulum
 from biases.systems.magnet_pendulum import MagnetPendulum
 from biases.systems.gyroscope import Gyroscope
 from biases.models.constrained_hnn import CHNN, CHLC
@@ -51,8 +52,9 @@ def fig_to_img(fig):
 
 
 class DynamicsModel(pl.LightningModule):
-    def __init__(self, hparams: argparse.Namespace):
+    def __init__(self, hparams: argparse.Namespace, **kwargs):
         super().__init__()
+        vars(hparams).update(**kwargs)
 
         euclidean = hparams.network_class not in [
             "NN",
@@ -153,7 +155,7 @@ class DynamicsModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-        return self.test_step(batch, batch_idx, integration_factor=0.5)
+        return self.test_step(batch, batch_idx, integration_factor=self.hparams.chunk_len * self.hparams.dt / self.hparams.integration_time)
 
     def validation_epoch_end(self, outputs):
         log, save = self._collect_test_steps(outputs)
@@ -161,12 +163,8 @@ class DynamicsModel(pl.LightningModule):
         return {"val_loss": log["validation/trajectory_mae"], "log": log}
 
     def test_step(self, batch, batch_idx, integration_factor=1.0):
-        (z0, ts), zts = batch
+        (z0, ts), _ = batch
         # Assume all ts are equally spaced and dynamics is time translation invariant
-        ts = ts[0] - ts[0, 0]  # Start ts from 0
-        pred_zs = self.rollout(z0, ts, tol=self.hparams.tol, method="dopri5")
-        loss = self.trajectory_mae(pred_zs, zts)
-
         (
             pred_zts,
             true_zts,
@@ -177,10 +175,11 @@ class DynamicsModel(pl.LightningModule):
             abs_err_pert_true,
         ) = self.compare_rollouts(
             z0,
-            integration_factor * self.body.integration_time,
-            self.body.dt,
+            integration_factor * self.hparams.integration_time,
+            self.hparams.dt,
             self.hparams.tol,
         )
+        loss = self.trajectory_mae(pred_zts, true_zts)
         pred_zts_true_energy = self.true_energy(pred_zts)
         true_zts_true_energy = self.true_energy(true_zts)
         pert_zts_true_energy = self.true_energy(pert_zts)
@@ -208,16 +207,16 @@ class DynamicsModel(pl.LightningModule):
         abs_err_pert_true = (collect_tensors("abs_err_pert_true", outputs)) + 1e-8
         # average of integration of log errs
         int_rel_err_pred_true = self.integrate_curve(
-            rel_err_pred_true.log(), dt=self.body.dt
+            rel_err_pred_true.log(), dt=self.hparams.dt
         ).mean(0)
         int_abs_err_pred_true = self.integrate_curve(
-            abs_err_pred_true.log(), dt=self.body.dt
+            abs_err_pred_true.log(), dt=self.hparams.dt
         ).mean(0)
         int_rel_err_pert_true = self.integrate_curve(
-            rel_err_pert_true.log(), dt=self.body.dt
+            rel_err_pert_true.log(), dt=self.hparams.dt
         ).mean(0)
         int_abs_err_pert_true = self.integrate_curve(
-            abs_err_pert_true.log(), dt=self.body.dt
+            abs_err_pert_true.log(), dt=self.hparams.dt
         ).mean(0)
 
         pred_zts_true_energy = collect_tensors("pred_zts_true_energy", outputs)
@@ -225,13 +224,13 @@ class DynamicsModel(pl.LightningModule):
         pert_zts_true_energy = collect_tensors("pert_zts_true_energy", outputs)
 
         int_pred_true_energy = self.integrate_curve(
-            pred_zts_true_energy, dt=self.body.dt
+            pred_zts_true_energy, dt=self.hparams.dt
         ).mean(0)
         int_true_true_energy = self.integrate_curve(
-            true_zts_true_energy, dt=self.body.dt
+            true_zts_true_energy, dt=self.hparams.dt
         ).mean(0)
         int_pert_true_energy = self.integrate_curve(
-            pert_zts_true_energy, dt=self.body.dt
+            pert_zts_true_energy, dt=self.hparams.dt
         ).mean(0)
         log = {
             "trajectory_mae": loss,
@@ -261,6 +260,7 @@ class DynamicsModel(pl.LightningModule):
         prev_device = list(self.parameters())[0].device
         prev_dtype = list(self.parameters())[0].dtype
         ts = torch.arange(0.0, integration_time, dt, device=z0.device, dtype=z0.dtype)
+        print("Rolling out model")
         pred_zts = self.rollout(z0, ts, tol, "dopri5")
         bs, Nlong, *rest = pred_zts.shape
         body = self.datasets["test"].body
@@ -270,15 +270,17 @@ class DynamicsModel(pl.LightningModule):
 
             pred_zts = flat_pred.reshape(bs, Nlong, *flat_pred.shape[1:])
 
-        # (bs, n_steps, 2, n_dof, d)
-        true_zts = body.integrate(z0, ts, tol=tol)
         perturbation = pert_eps * torch.randn_like(
             z0
         )  # perturbation does not respect constraints
         z0_perturbed = project_onto_constraints(
             body.body_graph, z0 + perturbation
         )  # project
-        pert_zts = body.integrate(z0_perturbed, ts, tol=tol)
+        # (bs, n_steps, 2, n_dof, d)
+        print("Rolling out true system")
+        z0_ = torch.cat([z0, z0_perturbed], dim=0)
+        true_zts_pert_zts = body.integrate(z0_, ts, tol=tol)
+        true_zts, pert_zts = true_zts_pert_zts.chunk(2, dim=0)
 
         sq_diff_pred_true = (pred_zts - true_zts).pow(2).sum((2, 3, 4))
         sq_diff_pert_true = (true_zts - pert_zts).pow(2).sum((2, 3, 4))
@@ -404,7 +406,7 @@ class DynamicsModel(pl.LightningModule):
         #     help="Amount of time to integrate for in generating training trajectories",
         # )
         #################################################################################
-        parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+        parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
         parser.add_argument(
             "--n-test", type=int, default=100, help="Number of test trajectories"
         )
@@ -434,7 +436,7 @@ class DynamicsModel(pl.LightningModule):
             "--n-epochs", type=int, default=2000, help="Number of training epochs"
         )
         parser.add_argument(
-            "--n-hidden", type=int, default=200, help="Number of hidden units"
+            "--n-hidden", type=int, default=256, help="Number of hidden units"
         )
         parser.add_argument(
             "--n-layers", type=int, default=3, help="Number of hidden layers"
@@ -497,6 +499,12 @@ def parse_misc():
         help="Number of training epochs per validation step",
     )
     parser.add_argument("--n-gpus", type=int, default=1, help="Number of training GPUs")
+    parser.add_argument(
+        "--terminate-on-nan",
+        action="store_true",
+        default=False,
+        help="Terminate upon getting nans in loss or parameters at end of each batch"
+    )
     parser.add_argument(
         "--tags", type=str, nargs="*", default=None, help="Experiment tags"
     )
