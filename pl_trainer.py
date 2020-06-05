@@ -395,17 +395,6 @@ class DynamicsModel(pl.LightningModule):
             default="RigidBodyDataset",
             help="Dataset class",
         )
-        ########## dt and integration_time are now attributes of body ###################
-        # parser.add_argument(
-        #     "--dt", type=float, default=1e-1, help="Timestep size in generated data"
-        # )
-        # parser.add_argument(
-        #     "--integration-time",
-        #     type=float,
-        #     default=10.0,
-        #     help="Amount of time to integrate for in generating training trajectories",
-        # )
-        #################################################################################
         parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
         parser.add_argument(
             "--n-test", type=int, default=100, help="Number of test trajectories"
@@ -509,6 +498,9 @@ def parse_misc():
         "--tags", type=str, nargs="*", default=None, help="Experiment tags"
     )
     parser.add_argument("--track-grad-norm", type=int, default=-1, help="Log gradient norms")
+    parser.add_argument(
+        "--wandb-project", type=str, default="", help="Project name for wandb"
+    )
     return parser
 
 
@@ -542,7 +534,7 @@ if __name__ == "__main__":
         print("Directory ", exp_dir, " already exists")
 
     logger = WandbLogger(
-        save_dir=exp_dir, project="constrained-pnns", log_model=True, tags=hparams.tags
+        save_dir=exp_dir, project=hparams.wandb_project, log_model=True, tags=hparams.tags
     )
     ckpt_dir = os.path.join(
         logger.experiment.dir, logger.name, f"version_{logger.version}", "checkpoints",
@@ -572,10 +564,3 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         trainer.test()
-
-    # ckpt_path = os.path.join(ckpt_dir, f"epoch={args.n_epochs - 1}.ckpt")
-    # probably remove logger when resuming since it's a finished experiment
-    # loaded_trainer = Trainer(
-    #    resume_from_checkpoint=ckpt_path, callbacks=callbacks, logger=logger
-    # )
-    # loaded_model = DynamicsModel.load_from_checkpoint(ckpt_path)
