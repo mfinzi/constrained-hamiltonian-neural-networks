@@ -6,7 +6,7 @@ setup(
     description="",
     version="0.1",
     author="",
-    author_email="maf820@nyu.edu",
+    author_email="anon",
     license="MIT",
     python_requires=">=3.6",
     install_requires=['pywavefront','networkx'],#
