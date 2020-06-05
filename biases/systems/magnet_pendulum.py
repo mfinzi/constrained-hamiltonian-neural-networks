@@ -17,6 +17,7 @@ class MagnetPendulum(RigidBody):
     def __init__(self, mass=3, l=1, q=.3, magnets=2):
         with FixedNumpySeed(0):
             mass = np.random.rand()*.8+2.4 if mass is None else mass
+        self.ms = [mass]
         self.arg_string = f"m{mass or 'r'}l{l}q{q}mn{magnets}"
         self.body_graph = BodyGraph()
         self.body_graph.add_extended_nd(0, m=mass, d=0, tether=(torch.zeros(3),l))
@@ -111,6 +112,7 @@ class MagnetPendulumAnimation(PendulumAnimation):
         super().__init__(*args, **kwargs)
         d = self.qt.shape[-1]
         empty = d * [[]]
+        self.objects["pts"] = self.ax.plot(*empty, "o", ms=10,c=self.colors[0])
         self.magnets = self.ax.plot(*empty, "o", ms=8)[0]
         self.magnets.set_data(*self.body.magnet_positions[:, :2].T)
         if d == 3:

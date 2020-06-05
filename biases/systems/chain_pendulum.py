@@ -4,7 +4,7 @@ import numpy as np
 from oil.utils.utils import export,FixedNumpySeed
 from biases.systems.rigid_body import RigidBody, BodyGraph, project_onto_constraints
 from biases.animation import Animation
-
+import copy
 
 @export
 class ChainPendulum(RigidBody):
@@ -18,6 +18,7 @@ class ChainPendulum(RigidBody):
         with FixedNumpySeed(0):
             ms = [.6+.8*np.random.rand() for _ in range(links)] if m is None else links*[m]
             ls = [.6+.8*np.random.rand() for _ in range(links)] if l is None else links*[l]
+        self.ms = copy.deepcopy(ms)
         self.body_graph.add_extended_nd(0, m=ms.pop(), d=0,tether=(torch.zeros(2),ls.pop()))
         for i in range(1, links):
             self.body_graph.add_extended_nd(i, m=ms.pop(), d=0)
@@ -127,8 +128,9 @@ class PendulumAnimation(Animation):
         empty = self.qt.shape[-1] * [[]]
         n_beams = len(nx.get_node_attributes(self.G, "tether")) + len(self.G.edges)
         self.objects["beams"] = sum(
-            [self.ax.plot(*empty, "-") for _ in range(n_beams)], []
+            [self.ax.plot(*empty, "-",color='k') for _ in range(n_beams)], []
         )
+        self.objects["pts"] = sum([self.ax.plot(*empty, "o", ms=10*body.ms[i]**2,c=self.colors[i]) for i in range(self.qt.shape[1])], [])
 
     def update(self, i=0):
         beams = [

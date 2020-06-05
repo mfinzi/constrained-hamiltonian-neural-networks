@@ -52,10 +52,12 @@ class ConstrainedHamiltonianDynamics(nn.Module):
         self,
         H: Callable[[Tensor, Tensor], Tensor],
         DPhi: Callable[[Tensor], Tensor],
+        #Phi=None,
         wgrad: bool = True,
     ):
         super().__init__()
         self.H = H
+        #self.Phi=Phi
         self.DPhi = DPhi
         self.wgrad = wgrad
         self.nfe = 0
@@ -73,7 +75,10 @@ class ConstrainedHamiltonianDynamics(nn.Module):
             P = Proj(self.DPhi(z))
             H = self.H(t, z).sum()  # elements in mb are independent, gives mb gradients
             dH = torch.autograd.grad(H, z, create_graph=self.wgrad)[0]  # gradient
-        return P(J(dH.unsqueeze(-1))).squeeze(-1)
+        dynamics = P(J(dH.unsqueeze(-1))).squeeze(-1)
+        # if self.Phi is not None:
+        #     dynamics += stabilization(self.DPhi(z),self.Phi(z))
+        return dynamics
 
 
 def J(M):
@@ -83,12 +88,16 @@ def J(M):
     JM = torch.cat([M[..., D // 2 :, :], -M[..., : D // 2, :]], dim=-2)
     return JM
 
+def stabilization(DPhi,Phi):
+    DPhiT = DPhi.transpose(-1, -2)
+    X,_ = torch.solve(Phi.unsqueeze(-1),DPhiT @ J(DPhi))
+    return -J(DPhi@X).squeeze(-1)
 
 def Proj(DPhi):
+    if DPhi.shape[-1]==0: return lambda M:M # (no constraints)
     def _P(M):
         DPhiT = DPhi.transpose(-1, -2)
-        reg = 0  # 1e-4*torch.eye(DPhi.shape[-1],dtype=DPhi.dtype,device=DPhi.device)[None]
-        X, _ = torch.solve(DPhiT @ M, DPhiT @ J(DPhi) + reg)
+        X, _ = torch.solve(DPhiT @ M, DPhiT @ J(DPhi))
         return M - J(DPhi @ X)
 
     return _P

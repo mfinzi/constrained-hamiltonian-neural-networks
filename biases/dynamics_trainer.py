@@ -14,15 +14,21 @@ class IntegratedDynamicsTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.hypers["tol"] = tol
         self.num_mbs = 0
-        self.text_to_add=np.arange(1)
+        #self.text_to_add=np.arange(1)
     def loss(self, minibatch):
         """ Standard cross-entropy loss """
         (z0, ts), true_zs = minibatch
         pred_zs = self.model.integrate(z0, ts[0], tol=self.hypers["tol"])
         self.num_mbs += 1
-        self.text_to_add = true_zs[0,:,0,:].cpu().detach().data.numpy()#true_zs[:,:,1,2].abs().max().cpu().detach().data.numpy()
+        #self.text_to_add = true_zs[:,:,1,:].abs().max().cpu().detach().data.numpy()#true_zs[:,:,1,2].abs().max().cpu().detach().data.numpy()
         return (pred_zs - true_zs).abs().mean()
-
+    # def step(self, minibatch):
+    #     self.optimizer.zero_grad()
+    #     loss = self.loss(minibatch)
+    #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1e2)
+    #     loss.backward()
+    #     self.optimizer.step()
+    #     return loss
     def metrics(self, loader):
         mae = lambda mb: self.loss(mb).cpu().data.numpy()
         return {"MAE": self.evalAverageMetrics(loader, mae)}
@@ -45,8 +51,8 @@ class IntegratedDynamicsTrainer(Trainer):
                 #z0 = z0.cpu().double()
                 T = T[0]
                 body = dataloader.dataset.body
-                long_T = body.dt * torch.arange(body.integration_time//body.dt).to(z0.device, z0.dtype)
-                zt_pred = self.model.integrate(z0, long_T,tol=1e-6,method='dopri5')
+                long_T = body.dt * torch.arange(10*body.integration_time//body.dt).to(z0.device, z0.dtype)
+                zt_pred = self.model.integrate(z0, long_T,tol=1e-7,method='dopri5')
                 bs, Nlong, *rest = zt_pred.shape
                 # add conversion from angular to euclidean
                 
@@ -68,7 +74,7 @@ class IntegratedDynamicsTrainer(Trainer):
                 pert_rel_errs.append(pert_rel_error)
             rel_errs = torch.cat(rel_errs, dim=0)  # (D,T)
             pert_rel_errs = torch.cat(pert_rel_errs, dim=0)  # (D,T)
-            both = torch.stack([rel_errs, pert_rel_errs], dim=-1)  # (D,T,2)
+            both = (rel_errs, pert_rel_errs,zt_pred,zt_pert)
         return both
 
 

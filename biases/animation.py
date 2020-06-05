@@ -2,6 +2,7 @@ from oil.utils.utils import export
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
+import numpy as np
 
 @export
 class Animation(object):
@@ -24,9 +25,10 @@ class Animation(object):
         if d!=3: self.ax.set_aspect("equal")
         #elf.ax.auto_scale_xyz()
         empty = d*[[]]
+        self.colors = np.random.choice([f"C{i}" for i in range(10)],size=n,replace=False)
         self.objects = {
-            'pts':sum([self.ax.plot(*empty, "o", ms=6) for i in range(n)], []),
-            'traj_lines':sum([self.ax.plot(*empty, "-") for _ in range(n)], []),
+            'pts':sum([self.ax.plot(*empty, "o", ms=6,color=self.colors[i]) for i in range(n)], []),
+            'traj_lines':sum([self.ax.plot(*empty, "-",color=self.colors[i]) for i in range(n)], []),
         }
         
     def init(self):
@@ -39,10 +41,10 @@ class Animation(object):
 
     def update(self, i=0):
         T,n,d = self.qt.shape
-        trail_len = 50
+        trail_len = 150
         for j in range(n):
             # trails
-            xyz = self.qt[i - trail_len if i > trail_len else 0 : i + 1,j,:]
+            xyz = self.qt[max(i - trail_len,0): i + 1,j,:]
             #chunks = xyz.shape[0]//10
             #xyz_chunks = torch.chunk(xyz,chunks)
             #for i,xyz in enumerate(xyz_chunks):

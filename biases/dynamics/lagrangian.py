@@ -147,17 +147,19 @@ class ConstrainedLagrangianDynamics(nn.Module):
             x, v = z.reshape(bs,2,n,d).unbind(dim=1)                    # (bs, n, d)
             x = torch.zeros_like(x, requires_grad=True) + x
             dV = torch.autograd.grad(self.V(x).sum(),x,create_graph=self.wgrad)[0]
+            f =  -self.Minv(dV).reshape(bs,n*d)                          # (bs,nd)
             DPhi = self.DPhi(x,v)                                   # (bs,2,n,d,2,C)
-            G = DPhi[:,0,:,:,0,:].reshape(bs,n*d,-1)                    # (bs,nd, C)
-            GT = G.permute(0,2,1)                                       # (bs,C, nd)
-            GdotT = DPhi[:,0,:,:,1,:].reshape(bs,n*d,-1).permute(0,2,1) # (bs,nd, C)
-            MinvG = self.Minv(G.reshape(bs,n,-1)).reshape(G.shape)      # (bs,nd, C)
-            GTMinvG = GT@MinvG                                          # (bs, C, C)
-            f =  self.Minv(dV).reshape(bs,n*d)                          # (bs,nd)
-            GTf = (GT@f.unsqueeze(-1)).squeeze(-1)                      # (bs, C)
-            violation = (GdotT@v.reshape(bs,n*d,1)).squeeze(-1)         # (bs, C)
-            total_violation = (GTf+violation).unsqueeze(-1)             # (bs,nd, 1)
-            lambdas = (MinvG@torch.solve(total_violation,GTMinvG)[0]).squeeze(-1) # (bs,nd)
-            vdot = f - lambdas                                          # (bs,nd)
+            if DPhi.shape[-1]!=0:
+                G = DPhi[:,0,:,:,0,:].reshape(bs,n*d,-1)                    # (bs,nd, C)
+                GT = G.permute(0,2,1)                                       # (bs,C, nd)
+                GdotT = DPhi[:,0,:,:,1,:].reshape(bs,n*d,-1).permute(0,2,1) # (bs,nd, C)
+                MinvG = self.Minv(G.reshape(bs,n,-1)).reshape(G.shape)      # (bs,nd, C)
+                GTMinvG = GT@MinvG                                          # (bs, C, C)
+                GTf = (GT@f.unsqueeze(-1)).squeeze(-1)                      # (bs, C)
+                violation = (GdotT@v.reshape(bs,n*d,1)).squeeze(-1)         # (bs, C)
+                total_violation = (GTf+violation).unsqueeze(-1)             # (bs,nd, 1)
+                lambdas = (MinvG@torch.solve(total_violation,GTMinvG)[0]).squeeze(-1) # (bs,nd)
+                vdot = f - lambdas                                          # (bs,nd)
+            else: vdot = f
             dynamics = torch.cat([v.reshape(bs,n*d),vdot],dim=-1)       # (bs,2nd)
         return dynamics

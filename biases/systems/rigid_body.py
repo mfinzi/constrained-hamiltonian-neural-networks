@@ -62,11 +62,10 @@ def edges_wattribute(G,node,attribute):
 @export
 class RigidBody(object, metaclass=Named):
     """ Two dimensional rigid body consisting of point masses on nodes (with zero inertia)
-        and beams with mass and inertia connecting nodes. Edge inertia is interpreted as
-        the unitless quantity, I/ml^2. Ie 1/12 for a beam, 1/2 for a disk"""
+        and beams with mass and inertia connecting nodes."""
     dt = .1
     integration_time=10
-    
+
     body_graph = NotImplemented
     _m = None
     _minv = None

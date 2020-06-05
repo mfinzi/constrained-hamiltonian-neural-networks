@@ -81,6 +81,7 @@ class HNN(nn.Module, metaclass=Named):
             dim1=-2,
             dim2=-1,
         )
+        #print(torch.nn.functional.softplus(torch.diagonal(mass_net_q, dim1=-2, dim2=-1)).min())
         res = res.transpose(-1, -2)  # Make lower triangular
         return res
 

@@ -17,6 +17,7 @@ class CoupledPendulum(MagnetPendulum):
         self.arg_string = f"n{bobs}m{m or 'r'}l{l}"
         with FixedNumpySeed(0):
             ms = [.6+.8*np.random.rand() for _ in range(bobs)] if m is None else bobs*[m]
+        self.ms = copy.deepcopy(ms)
         ls = bobs*[l]
         self.ks = torch.tensor((bobs-1)*[k]).float()
         self.locs = torch.zeros(bobs,3)
@@ -110,8 +111,8 @@ class CoupledPendulumAnimation(PendulumAnimation):
         self.objects["springs"] = self.ax.plot(*empty,c='k',lw=.6)#sum([self.ax.plot(*empty,c='k',lw=2) for _ in range(self.n-1)],[])
         self.helix = helix(200,turns=10)
     def update(self,i=0):
-        diffs = (self.qt[i,1:]-self.qt[i,:-1]).numpy()
-        x,y,z = (align2ref(diffs,self.helix)+self.qt[i,:-1][:,None].numpy()).reshape(-1,3).T
+        diffs = (self.qt[i,1:]-self.qt[i,:-1])
+        x,y,z = (align2ref(diffs,self.helix)+self.qt[i,:-1][:,None]).reshape(-1,3).T
         self.objects['springs'][0].set_data(x,y)
         self.objects['springs'][0].set_3d_properties(z)
         return super().update(i)
