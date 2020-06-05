@@ -9,7 +9,7 @@ setup(
     author_email="anon",
     license="MIT",
     python_requires=">=3.6",
-    install_requires=['pywavefront','networkx'],#
+    #install_requires=['pywavefront','networkx'],#
     packages=find_packages(),
     long_description=open("README.md").read(),
 )

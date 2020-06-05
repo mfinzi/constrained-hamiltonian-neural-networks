@@ -1,0 +1,24 @@
+name: chnn_clnn
+channels:
+    - conda-forge
+    - pytorch
+dependencies:
+    - python=3.7.*
+    - numpy
+    - scipy
+    - pandas
+    - scikit-learn
+    - pytorch
+    - torchvision
+    - matplotlib
+    - seaborn
+    - jupyter
+    - ipywidgets # other extensions: jupyterlab-manager, jupyterlab_vim, jupyterlab-matplotlib
+    - pip
+    - pip:
+        - wandb
+        - pytorch_lightning
+        - networkx
+        - pywavefront
+        - "--editable=git+https://github.com/mfinzi/LieConv#egg=LieConv"
+        - "--editable=git+https://github.com/mfinzi/olive-oil-ml#egg=olive-oil-ml"
