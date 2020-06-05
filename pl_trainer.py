@@ -406,7 +406,7 @@ class DynamicsModel(pl.LightningModule):
         #     help="Amount of time to integrate for in generating training trajectories",
         # )
         #################################################################################
-        parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+        parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
         parser.add_argument(
             "--n-test", type=int, default=100, help="Number of test trajectories"
         )
@@ -436,7 +436,7 @@ class DynamicsModel(pl.LightningModule):
             "--n-epochs", type=int, default=2000, help="Number of training epochs"
         )
         parser.add_argument(
-            "--n-hidden", type=int, default=200, help="Number of hidden units"
+            "--n-hidden", type=int, default=256, help="Number of hidden units"
         )
         parser.add_argument(
             "--n-layers", type=int, default=3, help="Number of hidden layers"
