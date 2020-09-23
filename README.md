@@ -1,25 +1,18 @@
-# Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints
 ![image](https://user-images.githubusercontent.com/12687085/94082856-da416d80-fdcf-11ea-8d69-bad3c604c35e.png)
+# Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints
+
 
 <!-- ![CHNN_perf_summary](https://user-images.githubusercontent.com/12687085/94081992-e75d5d00-fdcd-11ea-9df0-576af6909944.PNG) -->
 <!-- ![chaotic_2pendulum](https://user-images.githubusercontent.com/12687085/94081997-e9bfb700-fdcd-11ea-8ca1-ce7ce1cdc717.PNG) -->
 <!-- ![systems](https://user-images.githubusercontent.com/12687085/94081999-eb897a80-fdcd-11ea-8e29-c676d4e25f64.PNG) -->
-
-
-
-# Appendix
-The appendix is in this directory as `Appendix.pdf`
-
 
 # Code
 Our code in the `biases` directory relies on some publically available codebases which we package together
 as a conda environment.
 
 ## Installation instructions
-1. Install anaconda or miniconda
-2. Create a conda environment with `conda env create -f conda_env.yml`
-3. Install our codebase with `pip install ./` while in the current directory
-4. Create a wandb account for experiment tracking
+1. Install our codebase with `pip install ./` while in the current directory
+2. Create a wandb account for experiment tracking (optional)
 
 ## Train
 We have implemented a variety of challenging benchmarks for modeling physical dynamical systems such as ``ChainPendulum``, ``CoupledPendulum``,``MagnetPendulum``,``Gyroscope``,``Rotor`` which can be selected with the ``--body-class`` argument.
