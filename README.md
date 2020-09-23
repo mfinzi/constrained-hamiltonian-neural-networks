@@ -1,9 +1,8 @@
+
+# Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints
 <p align="center">
   <img src="https://user-images.githubusercontent.com/12687085/94082856-da416d80-fdcf-11ea-8d69-bad3c604c35e.png" width=900>
 </p>
-
-
-# Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints
 This repo contains the implementation and the experiments for the paper 
 
 [Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints](https://arxiv.org/abs/2002.12880)
@@ -29,8 +28,12 @@ Our code in the `biases` directory relies on some publically available codebases
 as a conda environment.
 
 # Installation instructions
-1. Install our codebase with `pip install ./` while in the current directory
-2. Create a wandb account for experiment tracking (optional)
+```bash
+git clone https://github.com/mfinzi/hamiltonian-biases.git
+cd hamiltonian-biases
+pip install -e .
+```
+(Optional) Create a wandb account for experiment tracking
 
 # Train Models
 We have implemented a variety of challenging benchmarks for modeling physical dynamical systems such as ``ChainPendulum``, ``CoupledPendulum``,``MagnetPendulum``,``Gyroscope``,``Rotor`` which can be selected with the ``--body-class`` argument.
