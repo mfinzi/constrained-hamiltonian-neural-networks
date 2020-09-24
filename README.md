@@ -18,6 +18,7 @@ as a conda environment. [![Code Climate maintainability](https://api.codeclimate
 
 # Installation instructions
 Install PyTorch>=1.0.0
+
 (Optional) Create a wandb account for experiment tracking
 ## Pip
 ```bash
@@ -29,7 +30,8 @@ pip install -e .
 ```bash
 git clone https://github.com/mfinzi/hamiltonian-biases.git
 cd hamiltonian-biases
-...
+conda env create -f conda_env.yml
+pip install ./
 ```
 
 # Train Models
