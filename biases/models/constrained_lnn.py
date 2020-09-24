@@ -132,28 +132,28 @@ class CLNN(CL):
 
 
 
-@export
-class CLLC(CL, LieResNet):
-    def __init__(self,G,
-        dof_ndim: Optional[int] = None,
-        angular_dims: Union[Tuple, bool] = tuple(),
-        hidden_size=200,num_layers=3,wgrad=True,bn=False,
-        group=None,knn=False,nbhd=100,mean=True,**kwargs):
-        n_dof = len(G.nodes())
-        super().__init__(G=G,dof_ndim=dof_ndim,angular_dims=angular_dims,wgrad=wgrad,
-            chin=n_dof,ds_frac=1,num_layers=num_layers,nbhd=nbhd,mean=mean,bn=bn,xyz_dim=dof_ndim,
-            group=group or Trivial(dof_ndim),fill=1.0,k=hidden_size,num_outputs=1,cache=False,knn=knn,**kwargs)
+# @export
+# class CLLC(CL, LieResNet):
+#     def __init__(self,G,
+#         dof_ndim: Optional[int] = None,
+#         angular_dims: Union[Tuple, bool] = tuple(),
+#         hidden_size=200,num_layers=3,wgrad=True,bn=False,
+#         group=None,knn=False,nbhd=100,mean=True,**kwargs):
+#         n_dof = len(G.nodes())
+#         super().__init__(G=G,dof_ndim=dof_ndim,angular_dims=angular_dims,wgrad=wgrad,
+#             chin=n_dof,ds_frac=1,num_layers=num_layers,nbhd=nbhd,mean=mean,bn=bn,xyz_dim=dof_ndim,
+#             group=group or Trivial(dof_ndim),fill=1.0,k=hidden_size,num_outputs=1,cache=False,knn=knn,**kwargs)
 
-    def V(self, x):
-        """ Input is a canonical position variable and the system parameters,
-        Args:
-            x: (N x n_dof x dof_ndim) sized Tensor representing the position in
-            Cartesian coordinates
-        Returns: a length N Tensor representing the potential energy
-        """
-        assert x.ndim == 3
-        mask = ~torch.isnan(x[..., 0])
-        # features = torch.zeros_like(x[...,:1])
-        bs, n, d = x.shape
-        features = torch.eye(n, device=x.device, dtype=x.dtype)[None].repeat((bs, 1, 1))
-        return super(CL, self).forward((x, features, mask)).squeeze(-1)
+#     def V(self, x):
+#         """ Input is a canonical position variable and the system parameters,
+#         Args:
+#             x: (N x n_dof x dof_ndim) sized Tensor representing the position in
+#             Cartesian coordinates
+#         Returns: a length N Tensor representing the potential energy
+#         """
+#         assert x.ndim == 3
+#         mask = ~torch.isnan(x[..., 0])
+#         # features = torch.zeros_like(x[...,:1])
+#         bs, n, d = x.shape
+#         features = torch.eye(n, device=x.device, dtype=x.dtype)[None].repeat((bs, 1, 1))
+#         return super(CL, self).forward((x, features, mask)).squeeze(-1)
