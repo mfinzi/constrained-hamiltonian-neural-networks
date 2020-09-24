@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint  # odeint_adjoint as odeint
 import numpy as np
-from lie_conv.utils import export
+from oil.utils.utils import export
 
 
 @export
