@@ -17,12 +17,20 @@ Our code in the `biases` directory relies on some publically available codebases
 as a conda environment. [![Code Climate maintainability](https://api.codeclimate.com/v1/badges/a99a88d28ad37a79dbf6/maintainability)](https://codeclimate.com/github/mfinzi/hamiltonian-biases/maintainability) [![ForTheBadge built-with-science](http://ForTheBadge.com/images/badges/built-with-science.svg)](https://xkcd.com/54/)
 
 # Installation instructions
+Install PyTorch>=1.0.0
+(Optional) Create a wandb account for experiment tracking
+## Pip
 ```bash
 git clone https://github.com/mfinzi/hamiltonian-biases.git
 cd hamiltonian-biases
 pip install -e .
 ```
-(Optional) Create a wandb account for experiment tracking
+## Conda
+```bash
+git clone https://github.com/mfinzi/hamiltonian-biases.git
+cd hamiltonian-biases
+...
+```
 
 # Train Models
 We have implemented a variety of challenging benchmarks for modeling physical dynamical systems such as ``ChainPendulum``, ``CoupledPendulum``,``MagnetPendulum``,``Gyroscope``,``Rotor`` which can be selected with the ``--body-class`` argument.
