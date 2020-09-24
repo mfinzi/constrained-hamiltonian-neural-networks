@@ -8,7 +8,7 @@ from torch.optim import Adam,AdamW
 from oil.utils.utils import LoaderTo, islice, FixedNumpySeed, cosLr
 from biases.systems.chain_pendulum import ChainPendulum
 import biases.datasets as datasets
-from biases.models import HNN,LNN,NN,CHNN,CHLC,CH,CL
+from biases.models import HNN,LNN,NN,CHNN,CH,CL
 from biases.datasets import RigidBodyDataset
 from biases.dynamics_trainer import IntegratedDynamicsTrainer
 import biases.models as models
