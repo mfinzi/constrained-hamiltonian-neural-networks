@@ -8,7 +8,7 @@ This repo contains the implementation and the experiments for the paper
 [Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints](https://arxiv.org/abs/2002.12880)
 by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.io/), and [Andrew Gordon Wilson](https://cims.nyu.edu/~andrewgw/). 
 
-[![Code Climate maintainability](https://img.shields.io/codeclimate/maintainability-percentage/mfinzi/LieConv)](https://codeclimate.com/github/mfinzi/LieConv)
+[![Code Climate maintainability](https://img.shields.io/codeclimate/maintainability-percentage/mfinzi/hamiltonian-biases)](https://codeclimate.com/github/mfinzi/hamiltonian-biases)
 <!-- ![CHNN_perf_summary](https://user-images.githubusercontent.com/12687085/94081992-e75d5d00-fdcd-11ea-9df0-576af6909944.PNG) -->
 <!-- ![chaotic_2pendulum](https://user-images.githubusercontent.com/12687085/94081997-e9bfb700-fdcd-11ea-8ca1-ce7ce1cdc717.PNG) -->
 <!-- ![systems](https://user-images.githubusercontent.com/12687085/94081999-eb897a80-fdcd-11ea-8e29-c676d4e25f64.PNG) -->
