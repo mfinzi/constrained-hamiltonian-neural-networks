@@ -1,4 +1,3 @@
-[![Code Climate maintainability](https://api.codeclimate.com/v1/badges/a99a88d28ad37a79dbf6/maintainability)](https://codeclimate.com/github/mfinzi/hamiltonian-biases/maintainability)
 # Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints
 <p align="center">
   <img src="https://user-images.githubusercontent.com/12687085/94082856-da416d80-fdcf-11ea-8d69-bad3c604c35e.png" width=900>
@@ -15,7 +14,7 @@ by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.i
 
 # Code
 Our code in the `biases` directory relies on some publically available codebases which we package together
-as a conda environment.
+as a conda environment. [![Code Climate maintainability](https://api.codeclimate.com/v1/badges/a99a88d28ad37a79dbf6/maintainability)](https://codeclimate.com/github/mfinzi/hamiltonian-biases/maintainability)
 
 # Installation instructions
 ```bash
