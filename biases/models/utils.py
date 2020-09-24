@@ -1,8 +1,11 @@
 import torch
 import torch.nn as nn
-from lie_conv.lieConv import Swish
 import math
 
+
+class Swish(nn.Module):
+    def forward(self,x):
+        return x*x.sigmoid()
 
 def FCtanh(chin, chout, zero_bias=False, orthogonal_init=False):
     return nn.Sequential(Linear(chin, chout, zero_bias, orthogonal_init), nn.Tanh())
