@@ -49,7 +49,7 @@ if __name__ == "__main__":
     with FixedNumpySeed(0):
         defaults = copy.deepcopy(makeTrainer.__kwdefaults__)
         defaults["save"] = False
-        namespace = (lieGroups,datasets,systems,models)
+        namespace = (datasets,systems,models)
         cfg = argupdated_config(defaults, namespace=namespace)
         cfg.pop('local_rank')
         save = cfg.pop('save')
