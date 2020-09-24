@@ -13,7 +13,6 @@ from biases.datasets import RigidBodyDataset
 from biases.dynamics_trainer import IntegratedDynamicsTrainer
 import biases.models as models
 import biases.systems as systems
-import lie_conv.lieGroups as lieGroups
 import pickle
 # network = HNN, LNN, NN, CHNN
 def makeTrainer(*,network=CHNN,net_cfg={},lr=3e-3,n_train=800,regen=False,
