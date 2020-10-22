@@ -22,14 +22,14 @@ Install PyTorch>=1.0.0
 (Optional) Create a wandb account for experiment tracking
 ## Pip
 ```bash
-git clone https://github.com/mfinzi/hamiltonian-biases.git
-cd hamiltonian-biases
+git clone https://github.com/mfinzi/constrained-hamiltonian-neural-networks.git
+cd constrained-hamiltonian-neural-networks
 pip install -e .
 ```
 ## Conda
 ```bash
-git clone https://github.com/mfinzi/hamiltonian-biases.git
-cd hamiltonian-biases
+git clone https://github.com/mfinzi/constrained-hamiltonian-neural-networks.git
+cd constrained-hamiltonian-neural-networks
 conda env create -f conda_env.yml
 pip install ./
 ```
