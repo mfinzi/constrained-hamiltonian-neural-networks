@@ -4,7 +4,7 @@
 </p>
 This repo contains the implementation and the experiments for the paper 
 
-[Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints](https://arxiv.org/abs/2002.12880)
+[Simplifying Hamiltonian and Lagrangian Neural Networks via Explicit Constraints](https://arxiv.org/abs/2010.13581)
 by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.io/), and [Andrew Gordon Wilson](https://cims.nyu.edu/~andrewgw/). 
 
 
