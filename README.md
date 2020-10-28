@@ -12,6 +12,11 @@ by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.i
 <!-- ![chaotic_2pendulum](https://user-images.githubusercontent.com/12687085/94081997-e9bfb700-fdcd-11ea-8ca1-ce7ce1cdc717.PNG) -->
 <!-- ![systems](https://user-images.githubusercontent.com/12687085/94081999-eb897a80-fdcd-11ea-8e29-c676d4e25f64.PNG) -->
 
+# Some example systems
+<!-- ![spring](spring.gif) -->
+<!-- ![pendulum](5pendulum.gif) -->
+<!-- ![magnet](magnetPendulum.gif) -->
+
 # Code
 Our code in the `biases` directory relies on some publically available codebases which we package together
 as a conda environment. [![Code Climate maintainability](https://api.codeclimate.com/v1/badges/a99a88d28ad37a79dbf6/maintainability)](https://codeclimate.com/github/mfinzi/hamiltonian-biases/maintainability) [![ForTheBadge built-with-science](http://ForTheBadge.com/images/badges/built-with-science.svg)](https://xkcd.com/54/)
