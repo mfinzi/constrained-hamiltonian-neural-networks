@@ -22,8 +22,8 @@ from biases.systems.rotor import Rotor
 from biases.systems.coupled_pendulum import CoupledPendulum
 from biases.systems.magnet_pendulum import MagnetPendulum
 from biases.systems.gyroscope import Gyroscope
-from biases.models.constrained_hnn import CHNN, CHLC
-from biases.models.constrained_lnn import CLNN, CLLC
+from biases.models.constrained_hnn import CHNN
+from biases.models.constrained_lnn import CLNN
 from biases.models.hnn import HNN
 from biases.models.lnn import LNN, DeLaN
 from biases.models.nn import NN, DeltaNN
