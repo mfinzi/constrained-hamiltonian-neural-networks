@@ -26,7 +26,8 @@ def rel_err(x: Tensor, y: Tensor) -> Tensor:
     return (((x - y) ** 2).sum() / ((x + y) ** 2).sum()).sqrt()
 
 def cross_matrix(k):
-    """Application of hodge star on R3, mapping Λ^1 R3 -> Λ^2 R3"""
+    """Application of hodge star on R3, mapping Λ^1 R3 -> Λ^2 R3.
+        See e.g. (https://en.wikipedia.org/wiki/Angular_velocity)"""
     K = torch.zeros(*k.shape[:-1],3,3,device=k.device,dtype=k.dtype)
     K[...,0,1] = -k[...,2]
     K[...,0,2] = k[...,1]
@@ -37,15 +38,20 @@ def cross_matrix(k):
     return K
 
 def uncross_matrix(K):
-    """Application of hodge star on R3, mapping Λ^2 R3 -> Λ^1 R3"""
+    """Application of hodge star on R3, mapping Λ^2 R3 -> Λ^1 R3
+        See e.g. (https://en.wikipedia.org/wiki/Angular_velocity)"""
     k = torch.zeros(*K.shape[:-1],device=K.device,dtype=K.dtype)
     k[...,0] = (K[...,2,1] - K[...,1,2])/2
     k[...,1] = (K[...,0,2] - K[...,2,0])/2
     k[...,2] = (K[...,1,0] - K[...,0,1])/2
     return k
 
-def eulerdot2omega(euler):
-    """(bs,3) -> (bs,3,3) matrix"""
+def eulerdot2omega(euler): #(reference: https://arxiv.org/pdf/1407.8155.pdf)
+    """ Given euler angles (phi,theta,psi) produces the matrix which converts
+        from euler angle derivatives (phi_dot,theta_dot,psi_dot) to angular
+        velocity (wx,wy,wz) expressed in the body frame. Supports batch dimension.
+        input: [euler (bs,3)]
+        output: [M (bs,3,3)]"""
     bs,_ = euler.shape
     M = torch.zeros(bs,3,3,device=euler.device,dtype=euler.dtype)
     phi,theta,psi = euler.T
@@ -59,7 +65,9 @@ def eulerdot2omega(euler):
 
 @export
 def euler2frame(euler_and_dot):
-    """ input: (bs,2,3)
+    """ Given an array that contains euler angles and derivatives, return an array
+        containing the frame (as expressed by the rotation matrix R) and its derivatives (R_dot).
+        input: (bs,2,3)
         output: (bs,2,3,3)"""
     euler,eulerdot = euler_and_dot.permute(1,0,2)
     omega = (eulerdot2omega(euler)@eulerdot.unsqueeze(-1)).squeeze(-1)
@@ -71,10 +79,10 @@ def euler2frame(euler_and_dot):
 
 @export
 def frame2euler(frame_pos_vel):
-    """ input: (bs,2,3,3)
+    """ Inverts euler2frame, converts from frame+derivatives-> euler+derivatives
+        input: (bs,2,3,3)
         output: (bs,2,3)"""
-    R,Rdot = frame_pos_vel.permute(1,0,3,2)#frame_pos_vel[:,0,1:].permute(0,2,1)-frame_pos_vel[:,0,0].unsqueeze(-1) #(bs,3,3)
-    #Rdot = frame_pos_vel[:,1,1:].permute(0,2,1)-frame_pos_vel[:,1,0].unsqueeze(-1) #(bs,3,3)
+    R,Rdot = frame_pos_vel.permute(1,0,3,2) #(bs,3,3)
     omega = uncross_matrix(R.permute(0,2,1)@Rdot) #angular velocity in body frame Omega = RTRdot
     angles = torch.from_numpy(np.ascontiguousarray(Rotation.from_matrix(R.data.cpu().numpy()).as_euler('ZXZ'))).to(R.device,R.dtype)
     eulerdot = torch.solve(omega.unsqueeze(-1),eulerdot2omega(angles))[0].squeeze(-1)
@@ -82,7 +90,10 @@ def frame2euler(frame_pos_vel):
 
 @export
 def bodyX2comEuler(X):
-    """ input: (bs,2,4,3) output: (bs,2,6)"""
+    """ Converts from they body matrix X (4,3) along with its derivatives X_dot (4,3) 
+        stacked as (2,4,3) to the center of mass and derivative (2,3) and euler angles
+        and derivatives (2,3) stacked together. Includes a batch axis
+        input: (bs,2,4,3) output: (bs,2,6)"""
     xcom = X[:,:,0] #(bs,2,3)
     euler = frame2euler(X[:,:,1:]-xcom[:,:,None,:])
     return torch.cat([xcom,euler],dim=-1)
@@ -90,7 +101,8 @@ def bodyX2comEuler(X):
 
 @export
 def comEuler2bodyX(com_euler):
-    """ output: (bs,2,6) input: (bs,2,4,3) """
+    """ Inverse of bodyX2comEuler
+        output: (bs,2,6) input: (bs,2,4,3) """
     xcom = com_euler[:,:,:3] #(bs,2,3)
     frame = euler2frame(com_euler[:,:,3:]) #(bs,2,3,3)
     shifted_frame = frame+xcom[:,:,None,:] # (bs,2,3,3)
@@ -101,24 +113,6 @@ def read_obj(filename):
     import pywavefront
     scene = pywavefront.Wavefront(filename,collect_faces=True)
     return np.roll(np.array(scene.vertices),1,axis=1), np.array(np.concatenate([mesh.faces for mesh in scene.mesh_list]))
-# def read_obj(filename):
-#     triangles = []
-#     vertices = []
-#     with open(filename) as file:
-#         for line in file:
-#             components = line.strip(' \n').split(' ')
-#             if components[0] == "f": # face data
-#                 # e.g. "f 1/1/1/ 2/2/2 3/3/3 4/4/4 ..."
-#                 indices = list(map(lambda c: int(c.split('/')[0]) - 1, components[1:]))
-#                 for i in range(0, len(indices) - 2):
-#                     triangles.append(indices[i: i+3])
-#             elif components[0] == "v": # vertex data
-#                 # e.g. "v  30.2180 89.5757 -76.8089"
-#                 #print(components)
-#                 vertex = list(map(lambda c: float(c), components[1:]))
-#                 vertices.append(vertex)
-#     return np.roll(np.array(vertices),1,axis=1), np.array(triangles)
-
 
 def Vols(mesh_verts):
     """ computes the volume of an obj from vertices of the boundary mesh"""
