@@ -100,8 +100,8 @@ class RigidAnimation(Animation):
         for j in range(1):
             xyz = self.qt[i,:,:]#.data.numpy() #(T,4,3)
             xcom = xyz[0] #(3)
-            R = (xyz[1:]-xcom[None,:]) # (3,3)
-            new_vertices = R.T@(self.vertices.reshape(*xcom.shape,-1))+xcom[:,None]
+            R = (xyz[1:]-xcom[None,:]).T # (3,3)
+            new_vertices = R@(self.vertices.reshape(*xcom.shape,-1))+xcom[:,None]
             self.objects['pts'].set_verts([new_vertices.T])
             #self.objects['pts'].remove()
             #self.objects['pts'] = self.ax.plot_trisurf(x, z, self.triangles, y, shade=True, color='white')
