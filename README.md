@@ -13,7 +13,7 @@ by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.i
 <!-- ![systems](https://user-images.githubusercontent.com/12687085/94081999-eb897a80-fdcd-11ea-8e29-c676d4e25f64.PNG) -->
 
 # Some example systems
-<img src="5pendulum.gif" width="350"/> <img src="springs.gif" width="350"/>  <img src="magnetPendulum.gif" width="350"/> 
+<img src="assets/5pendulum.gif" width="350"/> <img src="assets/springs.gif" width="350"/>  <img src="assets/magnetPendulum.gif" width="350"/> <img src="assets/magnet.gif" width="350"/> 
 
 # Code
 Our code in the `biases` directory relies on some publically available codebases which we package together

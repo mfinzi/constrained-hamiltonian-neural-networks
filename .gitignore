@@ -134,3 +134,11 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
+
+*.np
+*.lexicog*
+*.json
+*.csv
+*.jsonl
+*.pt
+*.ckpt
