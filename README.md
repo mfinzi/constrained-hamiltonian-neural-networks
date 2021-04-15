@@ -13,7 +13,7 @@ by [Marc Finzi](https://mfinzi.github.io/), [Alex Wang](https://keawang.github.i
 <!-- ![systems](https://user-images.githubusercontent.com/12687085/94081999-eb897a80-fdcd-11ea-8e29-c676d4e25f64.PNG) -->
 
 # Some example systems
-<img src="assets/5pendulum.gif" width="280"/> <img src="assets/spring2.gif" width="280"/>  <img src="assets/magnet_side.gif" width="280"/> <img src="assets/magnet.gif" width="280"/> <img src="assets/springs5.gif" width="280"/> <img src="assets/racket.gif" width="280"/> 
+<img src="assets/5pendulum.gif" width="250"/> <img src="assets/spring2.gif" width="250"/>  <img src="assets/magnet_side.gif" width="250"/> <img src="assets/magnet.gif" width="250"/> <img src="assets/springs5.gif" width="250"/> <img src="assets/racket.gif" width="250"/> 
 
 Each of these animations were produced by running 
 
