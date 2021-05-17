@@ -51,7 +51,7 @@ if __name__ == "__main__":
         defaults["save"] = False
         namespace = (datasets,systems,models)
         cfg = argupdated_config(defaults, namespace=namespace)
-        cfg.pop('local_rank')
+        cfg.pop('local_rank',None)
         save = cfg.pop('save')
         trainer = makeTrainer(**cfg)
         trainer.train(cfg['num_epochs'])
